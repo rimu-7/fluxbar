@@ -1,0 +1,56 @@
+#!/bin/bash
+TOOLCHAIN_SWIFTC="/tmp/test_patch/usr/bin/swiftc"
+IS_MANIFEST=0
+IS_PLUGIN=0
+OUT_PATH=""
+PREV=""
+for arg in "$@"; do
+  if [ "$PREV" = "-o" ]; then
+    OUT_PATH="$arg"
+  fi
+  PREV="$arg"
+  if [[ "$arg" == *Package*.swift ]]; then
+    IS_MANIFEST=1
+  elif [ "$arg" = "-lPackagePlugin" ]; then
+    IS_PLUGIN=1
+  fi
+done
+
+if [ $IS_PLUGIN -eq 1 ] && [ -n "$OUT_PATH" ]; then
+  mkdir -p "$(dirname "$OUT_PATH")"
+  clang -x c - -o "$OUT_PATH" <<< "int main(void) { return 0; }"
+  exit 0
+fi
+
+if [ $IS_MANIFEST -eq 1 ]; then
+  exec "$TOOLCHAIN_SWIFTC" "$@" \
+    -Xlinker -alias \
+    -Xlinker '_$s18PackageDescription0A0C4name19defaultLocalization9platforms9pkgConfig9providers8products12dependencies7targets21swiftLanguageVersions01cN8Standard03cxxnP0ACSS_AA0N3TagVSgSayAA17SupportedPlatformVGSgSSSgSayAA06SystemA8ProviderOGSgSayAA7ProductCGSayAC10DependencyCGSayAA6TargetCGSayAA05SwiftN4ModeOGSgAA09CLanguageP0OSgAA011CXXLanguageP0OSgtcfC' \
+    -Xlinker '_$s18PackageDescription0A0C4name19defaultLocalization9platforms9pkgConfig9providers8products12dependencies7targets21swiftLanguageVersions01cN8Standard03cxxnP0ACSS_AA0N3TagVSgSayAA17SupportedPlatformVGSgSSSgSayAA06SystemA8ProviderOGSgSayAA7ProductCGSayAC10DependencyCGSayAA6TargetCGSayAA12SwiftVersionOGSgAA09CLanguageP0OSgAA011CXXLanguageP0OSgtcfC' \
+    -Xlinker -alias \
+    -Xlinker '_$s18PackageDescription17SwiftLanguageModeO2v5yA2CmFWC' \
+    -Xlinker '_$s18PackageDescription12SwiftVersionO2v5yA2CmFWC' \
+    -Xlinker -alias \
+    -Xlinker '_$s18PackageDescription17SwiftLanguageModeO2v4yA2CmFWC' \
+    -Xlinker '_$s18PackageDescription12SwiftVersionO2v4yA2CmFWC' \
+    -Xlinker -alias \
+    -Xlinker '_$s18PackageDescription17SwiftLanguageModeO4v4_2yA2CmFWC' \
+    -Xlinker '_$s18PackageDescription12SwiftVersionO4v4_2yA2CmFWC' \
+    -Xlinker -alias \
+    -Xlinker '_$s18PackageDescription17SwiftLanguageModeO2v6yA2CmFWC' \
+    -Xlinker '_$s18PackageDescription12SwiftVersionO2v6yA2CmFWC' \
+    -Xlinker -alias \
+    -Xlinker '_$s18PackageDescription17SwiftLanguageModeO7versionyACSScACmFWC' \
+    -Xlinker '_$s18PackageDescription12SwiftVersionO7versionyACSScACmFWC' \
+    -Xlinker -alias \
+    -Xlinker '_$s18PackageDescription17SwiftLanguageModeOMa' \
+    -Xlinker '_$s18PackageDescription12SwiftVersionOMa' \
+    -Xlinker -alias \
+    -Xlinker '_$s18PackageDescription17SwiftLanguageModeOMn' \
+    -Xlinker '_$s18PackageDescription12SwiftVersionOMn' \
+    -Xlinker -alias \
+    -Xlinker '_$s18PackageDescription17SwiftLanguageModeON' \
+    -Xlinker '_$s18PackageDescription12SwiftVersionON'
+else
+  exec "$TOOLCHAIN_SWIFTC" "$@"
+fi
