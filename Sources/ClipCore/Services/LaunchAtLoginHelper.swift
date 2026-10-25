@@ -4,12 +4,18 @@ import ServiceManagement
 /// Helper for toggling and querying macOS Start at Login status.
 /// Supports both native macOS 13+ SMAppService and LaunchAgent plist fallback.
 public enum LaunchAtLoginHelper {
-    private static let launchAgentLabel = "com.clipsuite.ClipBar"
+    private static let launchAgentLabel = "com.notchkit.NotchKit"
 
     private static var launchAgentPlistURL: URL {
         let launchAgentsDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
         return launchAgentsDir.appendingPathComponent("\(launchAgentLabel).plist")
+    }
+
+    private static var legacyLaunchAgentPlistURL: URL {
+        let launchAgentsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        return launchAgentsDir.appendingPathComponent("com.clipsuite.ClipBar.plist")
     }
 
     public static var isEnabled: Bool {
@@ -22,7 +28,7 @@ public enum LaunchAtLoginHelper {
         }
 
         // 2. Check LaunchAgent plist for SPM/standalone execution
-        return FileManager.default.fileExists(atPath: launchAgentPlistURL.path)
+        return FileManager.default.fileExists(atPath: launchAgentPlistURL.path) || FileManager.default.fileExists(atPath: legacyLaunchAgentPlistURL.path)
     }
 
     public static func setEnabled(_ enable: Bool) {
@@ -75,5 +81,6 @@ public enum LaunchAtLoginHelper {
 
     private static func removeLaunchAgentPlist() {
         try? FileManager.default.removeItem(at: launchAgentPlistURL)
+        try? FileManager.default.removeItem(at: legacyLaunchAgentPlistURL)
     }
 }

@@ -12,19 +12,26 @@ public struct AppSettings: Codable, FetchableRecord, PersistableRecord, TableRec
     public var retentionDays: Int
     public var isPaused: Bool
     public var ignoreConcealed: Bool
+    /// Tool visibility toggles
+    public var isSpeedMeterEnabled: Bool
+    public var isClipboardEnabled: Bool
 
     public init(
         id: Int64 = primaryKeyId,
         maxHistory: Int = 1000,
         retentionDays: Int = 0,
         isPaused: Bool = false,
-        ignoreConcealed: Bool = true
+        ignoreConcealed: Bool = true,
+        isSpeedMeterEnabled: Bool = true,
+        isClipboardEnabled: Bool = true
     ) {
         self.id = id
         self.maxHistory = maxHistory
         self.retentionDays = retentionDays
         self.isPaused = isPaused
         self.ignoreConcealed = ignoreConcealed
+        self.isSpeedMeterEnabled = isSpeedMeterEnabled
+        self.isClipboardEnabled = isClipboardEnabled
     }
 
     public static let `default` = AppSettings()
@@ -35,5 +42,7 @@ public struct AppSettings: Codable, FetchableRecord, PersistableRecord, TableRec
         public static let retentionDays = Column(CodingKeys.retentionDays)
         public static let isPaused = Column(CodingKeys.isPaused)
         public static let ignoreConcealed = Column(CodingKeys.ignoreConcealed)
+        public static let isSpeedMeterEnabled = Column(CodingKeys.isSpeedMeterEnabled)
+        public static let isClipboardEnabled = Column(CodingKeys.isClipboardEnabled)
     }
 }

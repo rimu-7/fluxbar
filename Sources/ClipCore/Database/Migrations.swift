@@ -161,6 +161,17 @@ public enum Migrations {
             """)
         }
 
+        migrator.registerMigration("v5_notchkit_tools") { db in
+            let settingsCols = try db.columns(in: "app_settings")
+            let colNames = Set(settingsCols.map(\.name))
+            if !colNames.contains("isSpeedMeterEnabled") {
+                try db.execute(sql: "ALTER TABLE app_settings ADD COLUMN isSpeedMeterEnabled BOOLEAN NOT NULL DEFAULT 1;")
+            }
+            if !colNames.contains("isClipboardEnabled") {
+                try db.execute(sql: "ALTER TABLE app_settings ADD COLUMN isClipboardEnabled BOOLEAN NOT NULL DEFAULT 1;")
+            }
+        }
+
         return migrator
     }
 }

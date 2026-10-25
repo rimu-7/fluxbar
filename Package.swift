@@ -2,13 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "ClipSuite",
+    name: "NotchKit",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         .library(name: "ClipCore", targets: ["ClipCore"]),
-        .executable(name: "ClipBar", targets: ["ClipBar"]),
+        .library(name: "NetCore", targets: ["NetCore"]),
+        .executable(name: "NotchKit", targets: ["NotchKit"]),
         .executable(name: "clip", targets: ["clip"])
     ],
     dependencies: [
@@ -23,12 +24,20 @@ let package = Package(
             ],
             path: "Sources/ClipCore"
         ),
-        .executableTarget(
-            name: "ClipBar",
+        .target(
+            name: "NetCore",
             dependencies: [
-                "ClipCore"
+                .product(name: "GRDB", package: "GRDB.swift")
             ],
-            path: "Sources/ClipBar"
+            path: "Sources/NetCore"
+        ),
+        .executableTarget(
+            name: "NotchKit",
+            dependencies: [
+                "ClipCore",
+                "NetCore"
+            ],
+            path: "Sources/NotchKit"
         ),
         .executableTarget(
             name: "clip",
@@ -44,6 +53,13 @@ let package = Package(
                 "ClipCore"
             ],
             path: "Tests/ClipCoreTests"
+        ),
+        .testTarget(
+            name: "NetCoreTests",
+            dependencies: [
+                "NetCore"
+            ],
+            path: "Tests/NetCoreTests"
         )
     ]
 )

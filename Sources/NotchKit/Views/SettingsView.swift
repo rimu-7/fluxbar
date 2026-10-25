@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ClipCore
+import NetCore
 
 public struct SettingsView: View {
     @ObservedObject var viewModel: ClipBarViewModel
@@ -11,6 +12,9 @@ public struct SettingsView: View {
     @State private var retentionDays: Int
     @State private var maxHistory: Int
 
+    @State private var isClipboardEnabled: Bool
+    @State private var isSpeedMeterEnabled: Bool
+
     @State private var isCustomRetention: Bool = false
     @State private var customRetentionDays: Int = 35
     @State private var isCustomHistory: Bool = false
@@ -19,6 +23,7 @@ public struct SettingsView: View {
     @State private var copiedPath: Bool = false
     @State private var showingClearUnpinnedConfirmation: Bool = false
     @State private var showingDeleteAllConfirmation: Bool = false
+    @State private var showingResetBandwidthConfirmation: Bool = false
 
     private let standardRetentionOptions: [(label: String, days: Int)] = [
         ("1 day", 1),
@@ -51,6 +56,8 @@ public struct SettingsView: View {
         _ignoreConcealed = State(initialValue: currentSettings.ignoreConcealed)
         _retentionDays = State(initialValue: currentSettings.retentionDays)
         _maxHistory = State(initialValue: currentSettings.maxHistory)
+        _isClipboardEnabled = State(initialValue: currentSettings.isClipboardEnabled)
+        _isSpeedMeterEnabled = State(initialValue: currentSettings.isSpeedMeterEnabled)
 
         let isStandardRetention = [1, 7, 30, 90, 365, 0].contains(currentSettings.retentionDays)
         _isCustomRetention = State(initialValue: !isStandardRetention)
@@ -70,13 +77,16 @@ public struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    // GENERAL PREFERENCES SECTION
+                    // 1. NOTCHKIT TOOLS & MENU BAR VISIBILITY
+                    toolsSection
+
+                    // 2. GENERAL PREFERENCES SECTION
                     generalSection
 
-                    // STORAGE & RETENTION SECTION
+                    // 3. STORAGE & RETENTION SECTION
                     storageSection
 
-                    // DANGER ZONE SECTION
+                    // 4. DANGER ZONE SECTION
                     dangerZoneSection
                 }
                 .padding(14)
@@ -117,13 +127,111 @@ public struct SettingsView: View {
                 Spacer()
             }
 
-            Text("Settings")
+            Text("NotchKit Settings")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.primary)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Color.black.opacity(0.14))
+    }
+
+    // MARK: - Tools & Menu Bar Section
+
+    private var toolsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("NOTCHKIT TOOLS & MENU BAR")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.6)
+                .foregroundColor(.secondary.opacity(0.8))
+                .padding(.leading, 2)
+
+            VStack(spacing: 0) {
+                // 1. Clipboard Manager Tool Toggle
+                HStack(spacing: 11) {
+                    Image(systemName: "doc.on.clipboard.fill")
+                        .font(.system(size: 15))
+                        .foregroundColor(.cyan)
+                        .frame(width: 26, height: 26)
+                        .background(Color.cyan.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Clipboard Manager")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.primary)
+                        Text("Show clipboard history popover in menu bar.")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Toggle("", isOn: $isClipboardEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .onChange(of: isClipboardEnabled) { newValue in
+                            if !newValue && !isSpeedMeterEnabled {
+                                // Keep at least one tool enabled
+                                isClipboardEnabled = true
+                                return
+                            }
+                            var updated = viewModel.settings
+                            updated.isClipboardEnabled = newValue
+                            viewModel.updateSettings(updated)
+                        }
+                }
+                .padding(.vertical, 8)
+
+                Divider().opacity(0.15).padding(.leading, 37)
+
+                // 2. Internet Speed Meter Tool Toggle
+                HStack(spacing: 11) {
+                    Image(systemName: "network")
+                        .font(.system(size: 15))
+                        .foregroundColor(.green)
+                        .frame(width: 26, height: 26)
+                        .background(Color.green.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Internet Speed Meter")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.primary)
+                        Text("Display live download/upload rates and monthly usage in menu bar.")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Toggle("", isOn: $isSpeedMeterEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .onChange(of: isSpeedMeterEnabled) { newValue in
+                            if !newValue && !isClipboardEnabled {
+                                // Keep at least one tool enabled
+                                isSpeedMeterEnabled = true
+                                return
+                            }
+                            var updated = viewModel.settings
+                            updated.isSpeedMeterEnabled = newValue
+                            viewModel.updateSettings(updated)
+                        }
+                }
+                .padding(.vertical, 8)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.045))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
+        }
     }
 
     // MARK: - General Section
@@ -150,7 +258,7 @@ public struct SettingsView: View {
                         Text("Start at Login")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.primary)
-                        Text("Launch ClipBar automatically when your Mac turns on.")
+                        Text("Launch NotchKit automatically when your Mac turns on.")
                             .font(.system(size: 10.5))
                             .foregroundColor(.secondary)
                     }
@@ -668,7 +776,73 @@ public struct SettingsView: View {
             .padding(.leading, 2)
 
             VStack(spacing: 0) {
-                // 1. Clear Unpinned History
+                // 1. Reset Monthly Bandwidth Usage
+                if showingResetBandwidthConfirmation {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Reset monthly bandwidth stats? This clears downloaded/uploaded data counters.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 8) {
+                            Button("Cancel") {
+                                withAnimation(.easeInOut(duration: 0.12)) {
+                                    showingResetBandwidthConfirmation = false
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Color.white.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 5.5, style: .continuous))
+
+                            Button("Confirm Reset") {
+                                withAnimation(.easeInOut(duration: 0.12)) {
+                                    BandwidthStore.shared.resetCurrentMonthUsage()
+                                    showingResetBandwidthConfirmation = false
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Color.orange.opacity(0.22))
+                            .foregroundColor(.orange)
+                            .clipShape(RoundedRectangle(cornerRadius: 5.5, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                    .strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5)
+                            )
+                        }
+                    }
+                    .padding(9)
+                    .background(Color.orange.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .padding(.vertical, 4)
+                } else {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.12)) {
+                            showingResetBandwidthConfirmation = true
+                            showingClearUnpinnedConfirmation = false
+                            showingDeleteAllConfirmation = false
+                        }
+                    }) {
+                        HStack(spacing: 9) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 12))
+                                .foregroundColor(.orange)
+                                .frame(width: 20)
+                            Text("Reset Monthly Bandwidth Stats")
+                                .foregroundColor(.orange)
+                                .font(.system(size: 12, weight: .medium))
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Divider().opacity(0.15)
+
+                // 2. Clear Unpinned History
                 if showingClearUnpinnedConfirmation {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("Clear unpinned clips? Pinned clips will be kept safe.")
@@ -713,6 +887,7 @@ public struct SettingsView: View {
                         withAnimation(.easeInOut(duration: 0.12)) {
                             showingClearUnpinnedConfirmation = true
                             showingDeleteAllConfirmation = false
+                            showingResetBandwidthConfirmation = false
                         }
                     }) {
                         HStack(spacing: 9) {
@@ -733,7 +908,7 @@ public struct SettingsView: View {
 
                 Divider().opacity(0.15)
 
-                // 2. Delete All Clips (Fresh Start)
+                // 3. Delete All Clips (Fresh Start)
                 if showingDeleteAllConfirmation {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("⚠️ Delete ALL clips including pinned items?")
@@ -774,6 +949,7 @@ public struct SettingsView: View {
                         withAnimation(.easeInOut(duration: 0.12)) {
                             showingDeleteAllConfirmation = true
                             showingClearUnpinnedConfirmation = false
+                            showingResetBandwidthConfirmation = false
                         }
                     }) {
                         HStack(spacing: 9) {
@@ -794,14 +970,14 @@ public struct SettingsView: View {
 
                 Divider().opacity(0.15)
 
-                // 3. Quit ClipSuite
+                // 4. Quit NotchKit
                 Button(action: { NSApplication.shared.terminate(nil) }) {
                     HStack(spacing: 9) {
                         Image(systemName: "power")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                             .frame(width: 20)
-                        Text("Quit ClipSuite")
+                        Text("Quit NotchKit")
                             .foregroundColor(.secondary)
                             .font(.system(size: 12, weight: .medium))
                         Spacer()
