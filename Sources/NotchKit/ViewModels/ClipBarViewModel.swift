@@ -13,6 +13,8 @@ public enum FilterMode: String, CaseIterable, Identifiable, Sendable {
 
 @MainActor
 public final class ClipBarViewModel: ObservableObject {
+    public static let shared = ClipBarViewModel()
+
     @Published public var clips: [ClipItem] = []
     @Published public var searchQuery: String = ""
     @Published public var filterMode: FilterMode = .all

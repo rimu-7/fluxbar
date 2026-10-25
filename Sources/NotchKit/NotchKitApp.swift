@@ -6,32 +6,27 @@ import NetCore
 @main
 struct NotchKitApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var clipViewModel = ClipBarViewModel()
-    @StateObject private var speedViewModel = SpeedMeterViewModel.shared
 
     var body: some Scene {
-        // Tool 1: Clipboard History Manager Extra
-        MenuBarExtra("NotchKit Clips", systemImage: "paperclip", isInserted: $clipViewModel.settings.isClipboardEnabled) {
-            PopoverRootView(viewModel: clipViewModel)
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
-
-        // Tool 2: Internet Speed Meter Extra
-        MenuBarExtra(isInserted: $speedViewModel.isSpeedMeterEnabled) {
-            SpeedMeterPopoverView(speedVM: speedViewModel, clipVM: clipViewModel)
-        } label: {
-            SpeedMeterMenuBarLabel(viewModel: speedViewModel)
-        }
-        .menuBarExtraStyle(.window)
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Hide dock icon, accessory menu-bar only
+        // Run purely as an accessory menu bar application (no Dock icon)
         NSApplication.shared.setActivationPolicy(.accessory)
-        // Start background pasteboard watcher
+
+        // Start background pasteboard monitoring
         PasteboardService.shared.startMonitoring()
+
+        // Set up rock-solid native AppKit status items for Clipboard & Speed Meter
+        StatusBarManager.shared.setup(
+            clipViewModel: ClipBarViewModel.shared,
+            speedViewModel: SpeedMeterViewModel.shared
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
