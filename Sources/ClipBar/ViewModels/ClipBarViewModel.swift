@@ -124,7 +124,12 @@ public final class ClipBarViewModel: ObservableObject {
 
     public func togglePin(_ item: ClipItem) {
         guard let id = item.id else { return }
-        try? dbManager.togglePin(id: id)
+        do {
+            try dbManager.togglePin(id: id)
+            refreshStats()
+        } catch {
+            print("Failed to toggle pin for clip #\(id): \(error)")
+        }
     }
 
     public func togglePinSelected() {
@@ -134,7 +139,12 @@ public final class ClipBarViewModel: ObservableObject {
 
     public func deleteClip(_ item: ClipItem) {
         guard let id = item.id else { return }
-        try? dbManager.deleteClip(id: id)
+        do {
+            try dbManager.deleteClip(id: id)
+            refreshStats()
+        } catch {
+            print("Failed to delete clip #\(id): \(error)")
+        }
     }
 
     public func deleteSelected() {
@@ -145,6 +155,15 @@ public final class ClipBarViewModel: ObservableObject {
     public func clearUnpinned() {
         try? dbManager.clearUnpinned()
         refreshStats()
+    }
+
+    public func optimizeStorage() {
+        do {
+            try dbManager.optimizeDatabase()
+            refreshStats()
+        } catch {
+            print("Failed to optimize database: \(error)")
+        }
     }
 
     public func updateSettings(_ newSettings: AppSettings) {

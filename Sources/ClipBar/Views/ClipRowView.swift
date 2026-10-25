@@ -35,13 +35,15 @@ public struct ClipRowView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 8) {
+            // Top Preview & Badges
+            HStack(alignment: .top, spacing: 6) {
                 // Pin icon indicator if pinned
                 if item.isPinned {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 10.5, weight: .bold))
                         .foregroundColor(.orange)
                         .padding(.top, 2)
+                        .help("Pinned clip (will not be pruned)")
                 }
 
                 // Text preview
@@ -49,8 +51,13 @@ public struct ClipRowView: View {
                     .font(item.isCodeSnippet ? .system(size: 11.5, weight: .regular, design: .monospaced) : .system(size: 12.5, weight: .regular))
                     .foregroundColor(.primary)
                     .lineLimit(3)
+                    .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onSelect()
+                    }
 
                 // Quick copy keyboard shortcut pill or Copied indicator
                 if isCopied {
@@ -62,10 +69,9 @@ public struct ClipRowView: View {
                     }
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 2.5)
                     .background(Color.accentColor)
                     .cornerRadius(4)
-                    .transition(.opacity.combined(with: .scale))
                 } else if let quickIndex = quickIndex {
                     Text("⌘\(quickIndex)")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -77,9 +83,9 @@ public struct ClipRowView: View {
                 }
             }
 
-            // Metadata & Hover Action Bar
+            // Metadata & Action Buttons
             HStack(spacing: 8) {
-                // Source App & Time
+                // Metadata (App, Time, Char count, Copy count)
                 HStack(spacing: 4) {
                     if let appName = item.sourceAppName, !appName.isEmpty {
                         Image(systemName: "app.badge")
@@ -115,37 +121,52 @@ public struct ClipRowView: View {
                             .foregroundColor(.accentColor)
                     }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onSelect()
+                }
 
                 Spacer()
 
-                // Action buttons on hover or selection
-                if isHovered || isSelected {
-                    HStack(spacing: 4) {
-                        Button(action: onCopy) {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 10))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Copy (Return)")
-
-                        Button(action: onTogglePin) {
-                            Image(systemName: item.isPinned ? "pin.slash" : "pin")
-                                .font(.system(size: 10))
-                                .foregroundColor(item.isPinned ? .orange : .primary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(item.isPinned ? "Unpin (⌘P)" : "Pin (⌘P)")
-
-                        Button(action: onDelete) {
-                            Image(systemName: "trash")
-                                .font(.system(size: 10))
-                                .foregroundColor(.red.opacity(0.8))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Delete (⌫)")
+                // Stable action buttons (opacity-based to eliminate row jitter)
+                HStack(spacing: 4) {
+                    // Copy button
+                    Button(action: onCopy) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 10.5))
+                            .frame(width: 22, height: 20)
+                            .contentShape(Rectangle())
                     }
-                    .transition(.opacity)
+                    .buttonStyle(.borderless)
+                    .help("Copy to clipboard (Return)")
+
+                    // Pin / Unpin button
+                    Button(action: onTogglePin) {
+                        Image(systemName: item.isPinned ? "pin.fill" : "pin")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(item.isPinned ? .orange : .primary)
+                            .frame(width: 22, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .help(item.isPinned ? "Unpin clip (⌘P)" : "Pin clip (⌘P)")
+
+                    // Delete button
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.red.opacity(0.9))
+                            .frame(width: 22, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Delete clip (⌫)")
                 }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.primary.opacity(0.05))
+                .cornerRadius(5)
+                .opacity((isHovered || isSelected) ? 1.0 : 0.0)
             }
         }
         .padding(.horizontal, 10)
@@ -160,12 +181,19 @@ public struct ClipRowView: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
+            isHovered = hovering
         }
-        .onTapGesture {
-            onSelect()
+        .contextMenu {
+            Button(action: onCopy) {
+                Label("Copy to Clipboard", systemImage: "doc.on.doc")
+            }
+            Button(action: onTogglePin) {
+                Label(item.isPinned ? "Unpin Clip" : "Pin Clip", systemImage: item.isPinned ? "pin.slash" : "pin")
+            }
+            Divider()
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete Clip", systemImage: "trash")
+            }
         }
     }
 }

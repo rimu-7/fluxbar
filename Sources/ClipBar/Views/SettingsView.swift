@@ -137,6 +137,21 @@ public struct SettingsView: View {
                                     .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                                     .foregroundColor(.secondary)
                             }
+
+                            Divider().padding(.vertical, 2)
+
+                            Button(action: { viewModel.optimizeStorage() }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.accentColor)
+                                    Text("Reclaim Storage & Truncate WAL")
+                                        .font(.system(size: 11.5, weight: .medium))
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(12)

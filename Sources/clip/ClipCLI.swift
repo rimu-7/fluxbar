@@ -86,6 +86,31 @@ struct ListCommand: ParsableCommand {
     }
 }
 
+// MARK: - Target Resolution Helper
+
+func resolveClipTarget(_ target: String, idOnly: Bool, db: DatabaseManager) throws -> ClipItem {
+    let clean = target.hasPrefix("#") ? String(target.dropFirst()) : target
+    guard let num = Int64(clean) else {
+        throw ValidationError("Target '\(target)' must be a valid numeric ID (e.g. 12 or #12) or 1-based index.")
+    }
+    let clips = try db.queryClips(searchQuery: "", limit: 1000)
+    if idOnly {
+        if let match = clips.first(where: { $0.id == num }) {
+            return match
+        }
+    } else {
+        // First check exact ID match
+        if let match = clips.first(where: { $0.id == num }) {
+            return match
+        }
+        // Then check 1-based index in the current list
+        if num >= 1 && Int(num) <= clips.count {
+            return clips[Int(num) - 1]
+        }
+    }
+    throw ValidationError("Clip '\(target)' not found in database or list.")
+}
+
 // MARK: - Copy Command
 
 struct CopyCommand: ParsableCommand {
@@ -102,30 +127,7 @@ struct CopyCommand: ParsableCommand {
 
     func run() throws {
         let db = DatabaseManager.shared
-        guard let num = Int64(target) else {
-            throw ValidationError("Target must be a valid numeric ID or index.")
-        }
-
-        var targetClip: ClipItem?
-
-        if id {
-            let clips = try db.queryClips(searchQuery: "", limit: 1000)
-            targetClip = clips.first { $0.id == num }
-        } else {
-            // First check if it matches an exact ID
-            let clips = try db.queryClips(searchQuery: "", limit: 1000)
-            if let match = clips.first(where: { $0.id == num }) {
-                targetClip = match
-            } else if num >= 1 && Int(num) <= clips.count {
-                // Otherwise treat as 1-based index
-                targetClip = clips[Int(num) - 1]
-            }
-        }
-
-        guard let clip = targetClip else {
-            print("Error: Clip '#\(target)' not found.")
-            throw ExitCode.failure
-        }
+        let clip = try resolveClipTarget(target, idOnly: id, db: db)
 
         MainActor.assumeIsolated {
             PasteboardService.shared.copyToPasteboard(item: clip)
@@ -182,16 +184,28 @@ struct AddCommand: ParsableCommand {
 struct PinCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "pin",
-        abstract: "Toggle pinned status of a clip by ID"
+        abstract: "Toggle pinned status of a clip by ID or 1-based index"
     )
 
-    @Argument(help: "Clip ID to pin or unpin")
-    var id: Int64
+    @Argument(help: "Clip ID (e.g. 12 or #12) or 1-based list index (e.g. 1)")
+    var target: String
+
+    @Flag(name: .long, help: "Treat argument strictly as database ID")
+    var id: Bool = false
 
     func run() throws {
         let db = DatabaseManager.shared
-        try db.togglePin(id: id)
-        print("Toggled pin status for clip #\(id).")
+        let clip = try resolveClipTarget(target, idOnly: id, db: db)
+        guard let clipId = clip.id else {
+            throw ValidationError("Clip does not have a valid ID.")
+        }
+        let toggled = try db.togglePin(id: clipId)
+        if toggled {
+            let newStatus = !clip.isPinned
+            print("Toggled pin status for clip #\(clipId) (now \(newStatus ? "📌 pinned" : "unpinned")).")
+        } else {
+            print("Error: Could not toggle pin for clip #\(clipId).")
+        }
     }
 }
 
@@ -200,16 +214,27 @@ struct PinCommand: ParsableCommand {
 struct DeleteCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "delete",
-        abstract: "Delete a clip by ID"
+        abstract: "Delete a clip by ID or 1-based index"
     )
 
-    @Argument(help: "Clip ID to delete")
-    var id: Int64
+    @Argument(help: "Clip ID (e.g. 12 or #12) or 1-based list index (e.g. 1)")
+    var target: String
+
+    @Flag(name: .long, help: "Treat argument strictly as database ID")
+    var id: Bool = false
 
     func run() throws {
         let db = DatabaseManager.shared
-        try db.deleteClip(id: id)
-        print("Deleted clip #\(id).")
+        let clip = try resolveClipTarget(target, idOnly: id, db: db)
+        guard let clipId = clip.id else {
+            throw ValidationError("Clip does not have a valid ID.")
+        }
+        let deleted = try db.deleteClip(id: clipId)
+        if deleted {
+            print("Deleted clip #\(clipId).")
+        } else {
+            print("Error: Could not delete clip #\(clipId).")
+        }
     }
 }
 
@@ -248,8 +273,16 @@ struct StatsCommand: ParsableCommand {
         abstract: "Display database size, clip counts, and active settings"
     )
 
+    @Flag(name: .long, help: "Reclaim disk space and truncate WAL log")
+    var vacuum: Bool = false
+
     func run() throws {
         let db = DatabaseManager.shared
+        if vacuum {
+            try db.optimizeDatabase()
+            print("Optimized SQLite database and reclaimed disk storage.")
+        }
+
         let stats = try db.getDatabaseStats()
         let settings = try db.fetchSettings()
 

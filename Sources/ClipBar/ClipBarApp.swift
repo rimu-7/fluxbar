@@ -5,10 +5,11 @@ import ClipCore
 @main
 struct ClipBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var viewModel = ClipBarViewModel()
 
     var body: some Scene {
         MenuBarExtra("ClipSuite", systemImage: "paperclip") {
-            PopoverRootView()
+            PopoverRootView(viewModel: viewModel)
         }
         .menuBarExtraStyle(.window)
     }

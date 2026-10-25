@@ -1,26 +1,32 @@
 import SwiftUI
+import AppKit
 import ClipCore
 
 public struct PopoverRootView: View {
-    @StateObject private var viewModel = ClipBarViewModel()
+    @ObservedObject public var viewModel: ClipBarViewModel
     @FocusState private var isSearchFocused: Bool
+    @State private var keyMonitor: Any?
 
-    public init() {}
+    public init(viewModel: ClipBarViewModel) {
+        self.viewModel = viewModel
+    }
 
     public var body: some View {
         ZStack {
             if viewModel.showingSettings {
                 SettingsView(viewModel: viewModel)
-                    .transition(.move(edge: .trailing))
             } else {
                 mainContentView
-                    .transition(.move(edge: .leading))
             }
         }
-        .frame(width: 380, height: 480)
+        .frame(width: 380, height: 500)
         .background(.ultraThinMaterial)
         .onAppear {
             isSearchFocused = true
+            setupKeyboardMonitor()
+        }
+        .onDisappear {
+            removeKeyboardMonitor()
         }
     }
 
@@ -39,6 +45,9 @@ public struct PopoverRootView: View {
                             .textFieldStyle(.plain)
                             .font(.system(size: 12.5))
                             .focused($isSearchFocused)
+                            .onSubmit {
+                                viewModel.copySelected()
+                            }
 
                         if !viewModel.searchQuery.isEmpty {
                             Button(action: { viewModel.searchQuery = "" }) {
@@ -120,7 +129,7 @@ public struct PopoverRootView: View {
     private var clipsListView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 2) {
+                LazyVStack(spacing: 3) {
                     ForEach(Array(viewModel.clips.enumerated()), id: \.element.id) { index, item in
                         ClipRowView(
                             item: item,
@@ -147,6 +156,7 @@ public struct PopoverRootView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onChange(of: viewModel.selectedIndex) { newIndex in
                 withAnimation(.easeInOut(duration: 0.1)) {
                     proxy.scrollTo(newIndex, anchor: .center)
@@ -189,7 +199,7 @@ public struct PopoverRootView: View {
                 Text("Pin").font(.system(size: 9.5))
             }
             HStack(spacing: 2) {
-                Text("⌫").font(.system(size: 10, weight: .bold))
+                Text("⌘⌫ / ⌫").font(.system(size: 10, weight: .bold))
                 Text("Delete").font(.system(size: 9.5))
             }
             HStack(spacing: 2) {
@@ -202,58 +212,72 @@ public struct PopoverRootView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Color.primary.opacity(0.03))
-        // Keyboard Shortcuts handling
-        .background(
-            KeyboardShortcutsHandler(viewModel: viewModel)
-        )
     }
-}
 
-// Background invisible keyboard shortcut receptor
-private struct KeyboardShortcutsHandler: View {
-    @ObservedObject var viewModel: ClipBarViewModel
+    // MARK: - Native Keyboard Monitor
 
-    var body: some View {
-        ZStack {
-            // Up Arrow
-            Button("") {
-                viewModel.selectPrevious()
+    private func setupKeyboardMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak viewModel] event in
+            guard let vm = viewModel else { return event }
+
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isCommand = flags.contains(.command)
+
+            // 1. Arrow Down
+            if event.keyCode == 125 {
+                vm.selectNext()
+                return nil
             }
-            .keyboardShortcut(.upArrow, modifiers: [])
 
-            // Down Arrow
-            Button("") {
-                viewModel.selectNext()
+            // 2. Arrow Up
+            if event.keyCode == 126 {
+                vm.selectPrevious()
+                return nil
             }
-            .keyboardShortcut(.downArrow, modifiers: [])
 
-            // Return to copy
-            Button("") {
-                viewModel.copySelected()
+            // 3. Cmd + P: Pin / Unpin
+            if isCommand && (event.charactersIgnoringModifiers?.lowercased() == "p") {
+                vm.togglePinSelected()
+                return nil
             }
-            .keyboardShortcut(.return, modifiers: [])
 
-            // Cmd + P to Pin
-            Button("") {
-                viewModel.togglePinSelected()
+            // 4. Return: Copy selected
+            if event.keyCode == 36 && flags.isEmpty {
+                vm.copySelected()
+                return nil
             }
-            .keyboardShortcut("p", modifiers: .command)
 
-            // Delete to remove
-            Button("") {
-                viewModel.deleteSelected()
-            }
-            .keyboardShortcut(.delete, modifiers: [])
-
-            // 1 to 9 Quick copy
-            ForEach(1...9, id: \.self) { digit in
-                Button("") {
-                    viewModel.copyQuick(index: digit - 1)
+            // 5. Cmd + Delete (always delete selected) or Delete/Backspace (when search is empty)
+            if event.keyCode == 51 || event.keyCode == 117 {
+                if isCommand || vm.searchQuery.isEmpty {
+                    vm.deleteSelected()
+                    return nil
                 }
-                .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(48 + digit)!)), modifiers: .command)
             }
+
+            // 6. Cmd + 1...9: Quick copy
+            if isCommand, let char = event.charactersIgnoringModifiers?.first, let digit = char.wholeNumberValue, digit >= 1 && digit <= 9 {
+                vm.copyQuick(index: digit - 1)
+                return nil
+            }
+
+            // 7. Escape: Clear search
+            if event.keyCode == 53 {
+                if !vm.searchQuery.isEmpty {
+                    vm.searchQuery = ""
+                    return nil
+                }
+            }
+
+            return event
         }
-        .opacity(0)
-        .frame(width: 0, height: 0)
+    }
+
+    private func removeKeyboardMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
     }
 }

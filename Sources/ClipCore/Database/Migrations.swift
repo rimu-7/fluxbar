@@ -59,7 +59,7 @@ public enum Migrations {
                     VALUES('delete', old.id, old.content, old.sourceAppName);
                 END;
 
-                CREATE TRIGGER IF NOT EXISTS clip_items_au AFTER UPDATE ON clip_items BEGIN
+                CREATE TRIGGER IF NOT EXISTS clip_items_au AFTER UPDATE OF content, sourceAppName ON clip_items BEGIN
                     INSERT INTO clip_items_fts(clip_items_fts, rowid, content, sourceAppName)
                     VALUES('delete', old.id, old.content, old.sourceAppName);
                     INSERT INTO clip_items_fts(rowid, content, sourceAppName)
@@ -82,6 +82,21 @@ public enum Migrations {
                           LIMIT (SELECT maxHistory FROM app_settings WHERE id = 1)
                       );
                 END;
+            """)
+        }
+
+        migrator.registerMigration("v2_optimize_triggers_and_storage") { db in
+            // Recreate clip_items_au so updates to copyCount, updatedAt, isPinned do not trigger FTS5 churn
+            try db.execute(sql: """
+                DROP TRIGGER IF EXISTS clip_items_au;
+                CREATE TRIGGER IF NOT EXISTS clip_items_au AFTER UPDATE OF content, sourceAppName ON clip_items BEGIN
+                    INSERT INTO clip_items_fts(clip_items_fts, rowid, content, sourceAppName)
+                    VALUES('delete', old.id, old.content, old.sourceAppName);
+                    INSERT INTO clip_items_fts(rowid, content, sourceAppName)
+                    VALUES (new.id, new.content, new.sourceAppName);
+                END;
+                PRAGMA wal_autocheckpoint = 25;
+                PRAGMA journal_size_limit = 65536;
             """)
         }
 

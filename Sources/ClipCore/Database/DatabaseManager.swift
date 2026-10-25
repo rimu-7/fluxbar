@@ -54,6 +54,8 @@ public final class DatabaseManager: @unchecked Sendable {
             try db.execute(sql: "PRAGMA synchronous = NORMAL;")
             try db.execute(sql: "PRAGMA foreign_keys = ON;")
             try db.execute(sql: "PRAGMA recursive_triggers = ON;")
+            try db.execute(sql: "PRAGMA wal_autocheckpoint = 25;")
+            try db.execute(sql: "PRAGMA journal_size_limit = 65536;")
         }
 
         let pool = try DatabasePool(path: url.path, configuration: config)
@@ -175,7 +177,8 @@ public final class DatabaseManager: @unchecked Sendable {
 
     // MARK: - Pin / Unpin
 
-    public func togglePin(id: Int64) throws {
+    @discardableResult
+    public func togglePin(id: Int64) throws -> Bool {
         try dbWriter.write { db in
             let sql = """
             UPDATE clip_items
@@ -184,20 +187,32 @@ public final class DatabaseManager: @unchecked Sendable {
             WHERE id = ?;
             """
             try db.execute(sql: sql, arguments: [Date(), id])
+            return db.changesCount > 0
         }
     }
 
     // MARK: - Delete / Clear
 
-    public func deleteClip(id: Int64) throws {
+    @discardableResult
+    public func deleteClip(id: Int64) throws -> Bool {
         try dbWriter.write { db in
             try db.execute(sql: "DELETE FROM clip_items WHERE id = ?;", arguments: [id])
+            return db.changesCount > 0
         }
     }
 
     public func clearUnpinned() throws {
         try dbWriter.write { db in
             try db.execute(sql: "DELETE FROM clip_items WHERE isPinned = 0;")
+        }
+    }
+
+    // MARK: - Maintenance & Optimization
+
+    public func optimizeDatabase() throws {
+        try dbWriter.write { db in
+            try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE);")
+            try db.execute(sql: "PRAGMA optimize;")
         }
     }
 
@@ -220,6 +235,11 @@ public final class DatabaseManager: @unchecked Sendable {
     // MARK: - Stats
 
     public func getDatabaseStats() throws -> DatabaseStats {
+        // Attempt a passive WAL checkpoint to minimize WAL file size before checking
+        _ = try? dbWriter.write { db in
+            try? db.execute(sql: "PRAGMA wal_checkpoint(PASSIVE);")
+        }
+
         let (total, pinned): (Int, Int) = try dbWriter.read { db in
             let totalCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clip_items;") ?? 0
             let pinnedCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clip_items WHERE isPinned = 1;") ?? 0
