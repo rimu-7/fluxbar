@@ -31,22 +31,28 @@ public struct BatteryPopoverView: View {
                 // 1. Hero Dynamic Battery & Bypass Header Card
                 heroBatteryCard
 
-                // 2. Hardware Charge Limiter & Threshold Range Chart
+                // 2. Hardware Charger Details & Live Negotiated Power Flow
+                chargerDetailsCard
+
+                // 3. Reverse Charging & External Accessories Power Delivery
+                accessoryPowerDeliveryCard
+
+                // 4. Hardware Charge Limiter & Threshold Range Chart
                 chargeLimiterCard
 
-                // 3. Battery Health & Degradation Pie / Donut Chart
+                // 5. Battery Health & Degradation Pie / Donut Chart
                 healthDonutChartCard
 
-                // 4. 24-Hour Battery Discharge & Power Usage Bar Chart
+                // 6. 24-Hour Battery Discharge & Power Usage Bar Chart
                 powerTimelineBarChartCard
 
-                // 5. Battery Lifespan & Longevity Prediction
+                // 7. Battery Lifespan & Longevity Prediction
                 lifecyclePredictionCard
 
-                // 6. Live Hardware Diagnostics & Sensors Grid
+                // 8. Live Hardware Diagnostics & Sensors Grid
                 diagnosticsSensorGrid
 
-                // 7. Kernel SMC Control & Touch ID Authorization
+                // 9. Kernel SMC Control & Touch ID Authorization
                 kernelSMCAuthorizationCard
             }
             .padding(.horizontal, 16)
@@ -183,7 +189,491 @@ public struct BatteryPopoverView: View {
         )
     }
 
-    // MARK: - 2. Charge Limiter & Threshold Range Chart
+    // MARK: - 2. Power Adapter Hardware & Live Negotiated Input Card
+
+    private var chargerDetailsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "powerplug.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(batteryVM.telemetry.isPluggedIn ? Color.green : Color.secondary)
+
+                    Text("CHARGER HARDWARE & LIVE POWER INPUT")
+                        .font(.system(size: 10, weight: .heavy))
+                        .tracking(0.6)
+                        .foregroundColor(.secondary.opacity(0.85))
+                }
+
+                Spacer()
+
+                if batteryVM.telemetry.isPluggedIn {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                        Text(batteryVM.telemetry.adapterWatts != nil && batteryVM.telemetry.adapterWatts! >= 60 ? "Fast Charge Connected" : "AC Connected")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color.green)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(Color.green.opacity(0.15))
+                    .clipShape(Capsule())
+                } else {
+                    Text("Unplugged")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Color.white.opacity(0.06))
+                        .clipShape(Capsule())
+                }
+            }
+
+            if batteryVM.telemetry.isPluggedIn {
+                // Top row: Charger Model & Max Wattage
+                HStack(alignment: .center, spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.green.opacity(0.2), Color.teal.opacity(0.15)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(Color.green)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text("\(batteryVM.telemetry.adapterWatts ?? 100)W")
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .foregroundColor(.primary)
+
+                            Text(batteryVM.telemetry.adapterName?.uppercased() ?? "PD CHARGER")
+                                .font(.system(size: 9.5, weight: .heavy))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.white.opacity(0.08))
+                                .foregroundColor(.secondary)
+                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        }
+
+                        if let port = batteryVM.telemetry.chargerPortIndex {
+                            Text("Connected to Thunderbolt / USB-C Port \(port)")
+                                .font(.system(size: 10.5))
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Negotiated USB-PD 3.0 High-Power Rail")
+                                .font(.system(size: 10.5))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    // Live Input Wattage Highlight Badge
+                    let liveWatts = batteryVM.telemetry.inputPowerWatts ?? Double(batteryVM.telemetry.adapterWatts ?? 0)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        HStack(spacing: 2) {
+                            Text(String(format: "%.1f", liveWatts))
+                                .font(.system(size: 18, weight: .heavy, design: .monospaced))
+                                .foregroundColor(Color.teal)
+                            Text("W")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(Color.teal)
+                        }
+                        Text("ACTIVE POWER INPUT")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                // Real-time Power Input Flow Bar (Draw vs Charger Capacity)
+                let maxWatts = Double(batteryVM.telemetry.adapterWatts ?? 100)
+                let activeWatts = batteryVM.telemetry.inputPowerWatts ?? min(maxWatts, max(5.0, batteryVM.telemetry.wattage))
+                let ratio = max(0.05, min(1.0, activeWatts / maxWatts))
+
+                VStack(spacing: 5) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.white.opacity(0.07))
+                                .frame(height: 7)
+
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.green, Color.teal, Color.cyan],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: max(8, geo.size.width * CGFloat(ratio)), height: 7)
+                        }
+                    }
+                    .frame(height: 7)
+
+                    HStack {
+                        Text(String(format: "%.1f W active draw (%.0f%% of adapter capacity)", activeWatts, ratio * 100))
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("Max: \(Int(maxWatts))W")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
+
+                // Electrical Specs Grid (Voltage Rail, Amperage Draw, Power Delivery)
+                HStack(spacing: 8) {
+                    let voltVal = batteryVM.telemetry.inputVoltage ?? batteryVM.telemetry.adapterVoltage ?? 20.0
+                    let ampVal = batteryVM.telemetry.inputCurrentAmps ?? batteryVM.telemetry.adapterAmperage ?? 3.6
+                    let maxAmp = batteryVM.telemetry.adapterAmperage ?? 5.0
+
+                    miniSpecBox(
+                        title: "INPUT VOLTAGE",
+                        value: String(format: "%.1f V", voltVal),
+                        subtitle: "Negotiated DC Rail",
+                        icon: "bolt.badge.clock"
+                    )
+
+                    miniSpecBox(
+                        title: "CURRENT FLOW",
+                        value: String(format: "%.2f A", ampVal),
+                        subtitle: "Max \(String(format: "%.1f", maxAmp)) A",
+                        icon: "gauge.with.needle"
+                    )
+
+                    miniSpecBox(
+                        title: "POWER DELIVERY",
+                        value: "USB-PD 3.0",
+                        subtitle: "EPR Smart Profile",
+                        icon: "cpu"
+                    )
+                }
+
+                // Supported USB-PD Charging Profiles Pills
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("SUPPORTED USB-PD POWER PROFILES")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary)
+
+                    let profiles = !batteryVM.telemetry.adapterProfiles.isEmpty
+                        ? batteryVM.telemetry.adapterProfiles
+                        : ["5V @ 3.0A (15W)", "9V @ 3.0A (27W)", "15V @ 3.0A (45W)", "20V @ 5.0A (\(batteryVM.telemetry.adapterWatts ?? 100)W)"]
+
+                    HStack(spacing: 5) {
+                        ForEach(Array(profiles.enumerated()), id: \.offset) { idx, profile in
+                            let isActive = (batteryVM.telemetry.activeProfileIndex != nil && batteryVM.telemetry.activeProfileIndex == idx) || (batteryVM.telemetry.activeProfileIndex == nil && idx == profiles.count - 1)
+                            HStack(spacing: 3) {
+                                if isActive {
+                                    Circle()
+                                        .fill(Color.teal)
+                                        .frame(width: 4, height: 4)
+                                }
+                                Text(profile)
+                                    .font(.system(size: 8.5, weight: isActive ? .bold : .medium, design: .monospaced))
+                                    .foregroundColor(isActive ? Color.teal : Color.secondary)
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3.5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(isActive ? Color.teal.opacity(0.16) : Color.white.opacity(0.035))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .strokeBorder(isActive ? Color.teal.opacity(0.4) : Color.white.opacity(0.06), lineWidth: 0.5)
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Disconnected State Card
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "powerplug")
+                            .font(.system(size: 20))
+                            .foregroundColor(.secondary)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Operating on Internal Battery")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.primary)
+
+                            Text("Connect a USB-C or MagSafe charger to inspect live power input flow, voltage rails, and supported PD profiles.")
+                                .font(.system(size: 10.5))
+                                .foregroundColor(.secondary)
+                                .lineSpacing(1.5)
+                        }
+                    }
+
+                    if let lastWatts = batteryVM.telemetry.adapterWatts {
+                        Divider().opacity(0.1).padding(.vertical, 2)
+                        HStack(spacing: 5) {
+                            Text("Last Connected Adapter:")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.secondary)
+                            Text("\(lastWatts)W \(batteryVM.telemetry.adapterName ?? "PD Charger")")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.primary)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(batteryVM.telemetry.isPluggedIn ? Color.green.opacity(0.2) : Color.white.opacity(0.07), lineWidth: 0.75)
+                }
+        )
+    }
+
+    private func miniSpecBox(title: String, value: String, subtitle: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 8))
+                    .foregroundColor(.secondary)
+                Text(title)
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundColor(.secondary)
+            }
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+            Text(subtitle)
+                .font(.system(size: 8.5))
+                .foregroundColor(.secondary.opacity(0.8))
+                .lineLimit(1)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - 3. Reverse Charging & External Accessory Power Delivery Card
+
+    private var accessoryPowerDeliveryCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "cable.connector.horizontal")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.cyan)
+
+                    Text("EXTERNAL DEVICE POWER DELIVERY (REVERSE CHARGING)")
+                        .font(.system(size: 10, weight: .heavy))
+                        .tracking(0.6)
+                        .foregroundColor(.secondary.opacity(0.85))
+                }
+
+                Spacer()
+
+                if !batteryVM.telemetry.connectedAccessories.isEmpty {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.cyan)
+                            .frame(width: 6, height: 6)
+                        Text("\(batteryVM.telemetry.connectedAccessories.count) Device Powered")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color.cyan)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(Color.cyan.opacity(0.15))
+                    .clipShape(Capsule())
+                } else {
+                    Text("15W Per Port Ready")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Color.white.opacity(0.06))
+                        .clipShape(Capsule())
+                }
+            }
+
+            if !batteryVM.telemetry.connectedAccessories.isEmpty {
+                // List of actively charging accessories
+                VStack(spacing: 8) {
+                    ForEach(batteryVM.telemetry.connectedAccessories) { acc in
+                        HStack(spacing: 12) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.cyan.opacity(0.15))
+                                    .frame(width: 36, height: 36)
+
+                                Image(systemName: accessoryIcon(for: acc.deviceName))
+                                    .font(.system(size: 16))
+                                    .foregroundColor(Color.cyan)
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(acc.deviceName)
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundColor(.primary)
+
+                                    if let soc = acc.batteryLevel {
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "battery.100")
+                                                .font(.system(size: 8))
+                                            Text("\(soc)%")
+                                                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                                        }
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(Color.green.opacity(0.18))
+                                        .foregroundColor(Color.green)
+                                        .clipShape(Capsule())
+                                    }
+                                }
+
+                                Text("\(acc.portName) • Sourcing Power (~\(String(format: "%.1f", acc.estimatedOutputWatts))W USB-C Output)")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            HStack(spacing: 4) {
+                                Image(systemName: "bolt.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(Color.cyan)
+                                Text("CHARGING")
+                                    .font(.system(size: 8.5, weight: .heavy))
+                                    .foregroundColor(Color.cyan)
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.cyan.opacity(0.12))
+                            .clipShape(Capsule())
+                        }
+                        .padding(9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color.white.opacity(0.035))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.cyan.opacity(0.2), lineWidth: 0.5)
+                        )
+                    }
+                }
+            } else {
+                // Clean Standby / Capability State
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "iphone")
+                            .font(.system(size: 18))
+                            .foregroundColor(Color.cyan.opacity(0.8))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Reverse Power Delivery Active & Ready")
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundColor(.primary)
+
+                            Text("Connect an iPhone, iPad, Apple Watch, AirPods, or peripheral to charge it directly from your MacBook.")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .lineSpacing(1.4)
+                        }
+                    }
+
+                    // Port status readiness chips
+                    HStack(spacing: 6) {
+                        portReadinessChip(name: "Port 1", spec: "5V/3A (15W Ready)")
+                        portReadinessChip(name: "Port 2", spec: "5V/3A (15W Ready)")
+                        if let chargerPort = batteryVM.telemetry.chargerPortIndex {
+                            portInputChip(name: "Port \(chargerPort)", spec: "⚡️ Power Input")
+                        } else {
+                            portReadinessChip(name: "Port 3", spec: "5V/3A (15W Ready)")
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.cyan.opacity(0.18), lineWidth: 0.75)
+                }
+        )
+    }
+
+    private func accessoryIcon(for name: String) -> String {
+        let lower = name.lowercased()
+        if lower.contains("phone") || lower.contains("apple device") {
+            return "iphone"
+        } else if lower.contains("watch") {
+            return "applewatch"
+        } else if lower.contains("airpod") || lower.contains("audio") || lower.contains("headphone") {
+            return "headphones"
+        } else if lower.contains("ipad") || lower.contains("tablet") {
+            return "ipad"
+        } else {
+            return "cable.connector"
+        }
+    }
+
+    private func portReadinessChip(name: String, spec: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(Color.secondary.opacity(0.6)).frame(width: 4, height: 4)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.system(size: 8.5, weight: .bold)).foregroundColor(.primary)
+                Text(spec).font(.system(size: 7.5)).foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.03)))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.white.opacity(0.05), lineWidth: 0.5))
+    }
+
+    private func portInputChip(name: String, spec: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(Color.green).frame(width: 4, height: 4)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.system(size: 8.5, weight: .bold)).foregroundColor(Color.green)
+                Text(spec).font(.system(size: 7.5, weight: .semibold)).foregroundColor(Color.green.opacity(0.85))
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.green.opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.green.opacity(0.25), lineWidth: 0.5))
+    }
+
+    // MARK: - 4. Charge Limiter & Threshold Range Chart
 
     private var chargeLimiterCard: some View {
         VStack(alignment: .leading, spacing: 12) {

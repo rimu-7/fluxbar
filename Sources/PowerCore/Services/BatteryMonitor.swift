@@ -92,6 +92,15 @@ public final class BatteryMonitor: @unchecked Sendable {
         var timeRemainingMinutes: Int? = nil
         var adapterWatts: Int? = nil
         var adapterName: String? = nil
+        var adapterVoltage: Double? = nil
+        var adapterAmperage: Double? = nil
+        var inputPowerWatts: Double? = nil
+        var inputVoltage: Double? = nil
+        var inputCurrentAmps: Double? = nil
+        var activeProfileIndex: Int? = nil
+        var chargerPortIndex: Int? = nil
+        var adapterProfiles: [String] = []
+        var connectedAccessories: [ConnectedAccessoryPower] = []
         var temperature: Double = 28.0
 
         // 1. Query AppleSmartBattery IORegistryEntry
@@ -161,6 +170,65 @@ public final class BatteryMonitor: @unchecked Sendable {
                     }
                     if let desc = adapterDetails["Description"] as? String {
                         adapterName = desc
+                    }
+                    if let v = adapterDetails["AdapterVoltage"] as? Int, v > 0 {
+                        adapterVoltage = Double(v) / 1000.0
+                    }
+                    if let a = adapterDetails["Current"] as? Int, a > 0 {
+                        adapterAmperage = Double(a) / 1000.0
+                    }
+                    if let hvcIdx = adapterDetails["UsbHvcHvcIndex"] as? Int {
+                        activeProfileIndex = hvcIdx
+                    }
+                    if let menu = adapterDetails["UsbHvcMenu"] as? [[String: Any]] {
+                        for item in menu {
+                            if let mv = item["MaxVoltage"] as? Int, let ma = item["MaxCurrent"] as? Int {
+                                let v = Double(mv) / 1000.0
+                                let a = Double(ma) / 1000.0
+                                let w = (v * a * 10).rounded() / 10.0
+                                adapterProfiles.append("\(Int(v))V @ \(String(format: "%.1f", a))A (\(Int(w))W)")
+                            }
+                        }
+                    }
+                }
+
+                if let pwrDist = dict["PowerDistribution"] as? [String: Any] {
+                    if let ip = pwrDist["IPDInputPower"] as? Int, ip > 0 {
+                        inputPowerWatts = (Double(ip) / 100.0).rounded() / 10.0
+                    }
+                    if let iv = pwrDist["IPDInputVoltage"] as? Int, iv > 0 {
+                        inputVoltage = (Double(iv) / 100.0).rounded() / 10.0
+                    }
+                    if let ia = pwrDist["IPDInputCurrent"] as? Int, ia > 0 {
+                        inputCurrentAmps = (Double(ia) / 100.0).rounded() / 10.0
+                    }
+                }
+
+                if let fedList = dict["FedDetails"] as? [[String: Any]] {
+                    for (idx, fed) in fedList.enumerated() {
+                        let isConn = (fed["FedExternalConnected"] as? Int ?? 0) != 0 || (fed["FedExternalConnected"] as? Bool ?? false)
+                        let role = fed["FedPortPowerRole"] as? Int ?? 0 // 0 = Sink (Mac receiving power), 1 = Source (Mac powering peripheral)
+                        let vendor = fed["FedVendorID"] as? Int ?? 0
+
+                        if isConn {
+                            if role == 0 && (vendor == 10007 || vendor == 0) {
+                                chargerPortIndex = idx + 1
+                            } else if role == 1 || (vendor != 10007 && vendor != 0) {
+                                let soc = fed["FedStateOfCharge"] as? Int
+                                let validSoc = (soc != nil && soc! > 0 && soc! <= 100) ? soc : nil
+                                let devName = (vendor == 10007 || vendor == 0x05AC) ? "Apple Device (iPhone / Watch)" : "USB-C Peripheral"
+                                connectedAccessories.append(
+                                    ConnectedAccessoryPower(
+                                        portIndex: idx + 1,
+                                        portName: "Thunderbolt / USB-C Port \(idx + 1)",
+                                        deviceName: devName,
+                                        isChargingFromMac: true,
+                                        batteryLevel: validSoc,
+                                        estimatedOutputWatts: 7.5
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -242,7 +310,16 @@ public final class BatteryMonitor: @unchecked Sendable {
             adapterName: adapterName,
             chargingState: chargingState,
             isBypassed: isBypassed,
-            timestamp: Date()
+            timestamp: Date(),
+            adapterVoltage: adapterVoltage,
+            adapterAmperage: adapterAmperage,
+            inputPowerWatts: inputPowerWatts,
+            inputVoltage: inputVoltage,
+            inputCurrentAmps: inputCurrentAmps,
+            activeProfileIndex: activeProfileIndex,
+            chargerPortIndex: chargerPortIndex,
+            adapterProfiles: adapterProfiles,
+            connectedAccessories: connectedAccessories
         )
     }
 

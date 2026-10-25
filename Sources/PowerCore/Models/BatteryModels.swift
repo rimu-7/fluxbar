@@ -38,6 +38,33 @@ public enum ChargingState: String, Codable, Sendable, Equatable {
     }
 }
 
+/// Represents external peripherals (iPhone, Watch, AirPods, accessories) drawing reverse charging power from MacBook
+public struct ConnectedAccessoryPower: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { "\(portIndex)-\(deviceName)" }
+    public var portIndex: Int
+    public var portName: String
+    public var deviceName: String
+    public var isChargingFromMac: Bool
+    public var batteryLevel: Int?
+    public var estimatedOutputWatts: Double
+
+    public init(
+        portIndex: Int,
+        portName: String = "USB-C Port",
+        deviceName: String = "USB Device",
+        isChargingFromMac: Bool = true,
+        batteryLevel: Int? = nil,
+        estimatedOutputWatts: Double = 7.5
+    ) {
+        self.portIndex = portIndex
+        self.portName = portName
+        self.deviceName = deviceName
+        self.isChargingFromMac = isChargingFromMac
+        self.batteryLevel = batteryLevel
+        self.estimatedOutputWatts = estimatedOutputWatts
+    }
+}
+
 /// Rich snapshot of real-time battery and power hardware telemetry
 public struct BatteryTelemetry: Codable, Sendable, Equatable {
     public var percentage: Int
@@ -61,6 +88,17 @@ public struct BatteryTelemetry: Codable, Sendable, Equatable {
     public var isBypassed: Bool          // True when AC connected and charging inhibited
     public var timestamp: Date
 
+    // Detailed Charger Hardware Telemetry
+    public var adapterVoltage: Double?      // e.g. 20.0 V
+    public var adapterAmperage: Double?     // e.g. 4.99 A
+    public var inputPowerWatts: Double?     // e.g. 72.0 W (live active negotiated power flow)
+    public var inputVoltage: Double?        // e.g. 20.0 V
+    public var inputCurrentAmps: Double?    // e.g. 3.6 A
+    public var activeProfileIndex: Int?     // e.g. 4 (index of selected USB-PD profile)
+    public var chargerPortIndex: Int?       // e.g. 3 (which USB-C port charger is connected to)
+    public var adapterProfiles: [String]    // e.g. ["5V @ 3A", "9V @ 3A", "15V @ 3A", "20V @ 5A"]
+    public var connectedAccessories: [ConnectedAccessoryPower] // External devices being charged by Mac
+
     public init(
         percentage: Int = 100,
         maxCapacity: Int = 100,
@@ -81,7 +119,16 @@ public struct BatteryTelemetry: Codable, Sendable, Equatable {
         adapterName: String? = nil,
         chargingState: ChargingState = .bypassed,
         isBypassed: Bool = false,
-        timestamp: Date = Date()
+        timestamp: Date = Date(),
+        adapterVoltage: Double? = nil,
+        adapterAmperage: Double? = nil,
+        inputPowerWatts: Double? = nil,
+        inputVoltage: Double? = nil,
+        inputCurrentAmps: Double? = nil,
+        activeProfileIndex: Int? = nil,
+        chargerPortIndex: Int? = nil,
+        adapterProfiles: [String] = [],
+        connectedAccessories: [ConnectedAccessoryPower] = []
     ) {
         self.percentage = percentage
         self.maxCapacity = maxCapacity
@@ -103,6 +150,15 @@ public struct BatteryTelemetry: Codable, Sendable, Equatable {
         self.chargingState = chargingState
         self.isBypassed = isBypassed
         self.timestamp = timestamp
+        self.adapterVoltage = adapterVoltage
+        self.adapterAmperage = adapterAmperage
+        self.inputPowerWatts = inputPowerWatts
+        self.inputVoltage = inputVoltage
+        self.inputCurrentAmps = inputCurrentAmps
+        self.activeProfileIndex = activeProfileIndex
+        self.chargerPortIndex = chargerPortIndex
+        self.adapterProfiles = adapterProfiles
+        self.connectedAccessories = connectedAccessories
     }
 
     public static let `default` = BatteryTelemetry()
