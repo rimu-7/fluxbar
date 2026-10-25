@@ -114,17 +114,26 @@ let netMethods = [
     ("testBandwidthStoreMonthlyAndDailyTracking", "testBandwidthStoreMonthlyAndDailyTrackingAndReturnError:")
 ]
 
+let powerMethods = [
+    ("testBatteryTelemetryCalculations", "testBatteryTelemetryCalculationsAndReturnError:"),
+    ("testBypassStateAndFormatting", "testBypassStateAndFormattingAndReturnError:"),
+    ("testSMCFourCCEncoding", "testSMCFourCCEncodingAndReturnError:"),
+    ("testChargeLimiterHysteresisLogic", "testChargeLimiterHysteresisLogicAndReturnError:"),
+    ("testPowerSettingsPresets", "testPowerSettingsPresetsAndReturnError:")
+]
+
 let startTotal = Date()
 let clipRes = runSuite(className: "ClipCoreTests.DatabasePerformanceTests", methods: clipMethods)
 let netRes = runSuite(className: "NetCoreTests.NetworkMonitorTests", methods: netMethods)
+let powerRes = runSuite(className: "PowerCoreTests.BatteryLimiterTests", methods: powerMethods)
 
-let totalPassed = clipRes.passed + netRes.passed
-let grandTotal = clipRes.total + netRes.total
+let totalPassed = clipRes.passed + netRes.passed + powerRes.passed
+let grandTotal = clipRes.total + netRes.total + powerRes.total
 let totalDuration = String(format: "%.3f", Date().timeIntervalSince(startTotal))
 
 print("\nExecuted \(grandTotal) tests, with 0 failures (\(grandTotal - totalPassed) unexpected) in \(totalDuration) seconds.")
 if totalPassed == grandTotal {
-    print("✅ All ClipCore and NetCore performance, trigger, and bandwidth tests passed successfully!")
+    print("✅ All ClipCore, NetCore, and PowerCore performance, trigger, bandwidth, and battery limiter tests passed successfully!")
     exit(0)
 } else {
     exit(1)

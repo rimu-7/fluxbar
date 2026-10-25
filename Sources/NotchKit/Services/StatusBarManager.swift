@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import ClipCore
 import NetCore
+import PowerCore
 import Combine
 
 @MainActor
@@ -10,26 +11,37 @@ public final class StatusBarManager: NSObject {
 
     private var clipStatusItem: NSStatusItem?
     private var speedStatusItem: NSStatusItem?
+    private var batteryStatusItem: NSStatusItem?
 
     private var clipPopover: NSPopover?
     private var speedPopover: NSPopover?
+    private var batteryPopover: NSPopover?
 
     private var cancellables = Set<AnyCancellable>()
     private var clipViewModel: ClipBarViewModel?
     private var speedViewModel: SpeedMeterViewModel?
+    private var batteryViewModel: BatteryViewModel?
 
-    public func setup(clipViewModel: ClipBarViewModel, speedViewModel: SpeedMeterViewModel) {
+    public func setup(
+        clipViewModel: ClipBarViewModel,
+        speedViewModel: SpeedMeterViewModel,
+        batteryViewModel: BatteryViewModel
+    ) {
         self.clipViewModel = clipViewModel
         self.speedViewModel = speedViewModel
+        self.batteryViewModel = batteryViewModel
 
         setupClipPopover(viewModel: clipViewModel)
         setupSpeedPopover(speedVM: speedViewModel, clipVM: clipViewModel)
+        setupBatteryPopover(batteryVM: batteryViewModel, clipVM: clipViewModel)
 
         setupClipStatusItem()
         setupSpeedStatusItem()
+        setupBatteryStatusItem()
 
         observeSettings()
         observeSpeedUpdates()
+        observeBatteryUpdates()
     }
 
     // MARK: - Popovers
@@ -50,6 +62,15 @@ public final class StatusBarManager: NSObject {
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: SpeedMeterPopoverView(speedVM: speedVM, clipVM: clipVM))
         self.speedPopover = popover
+    }
+
+    private func setupBatteryPopover(batteryVM: BatteryViewModel, clipVM: ClipBarViewModel) {
+        let popover = NSPopover()
+        popover.contentSize = NSSize(width: 380, height: 540)
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentViewController = NSHostingController(rootView: BatteryPopoverView(batteryVM: batteryVM, clipVM: clipVM))
+        self.batteryPopover = popover
     }
 
     // MARK: - Status Items
@@ -79,6 +100,19 @@ public final class StatusBarManager: NSObject {
         self.speedStatusItem = item
     }
 
+    private func setupBatteryStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.title = "⚡️ 80%"
+            button.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium)
+            button.target = self
+            button.action = #selector(handleBatteryButtonClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+        item.isVisible = clipViewModel?.settings.isBatteryLimiterEnabled ?? true
+        self.batteryStatusItem = item
+    }
+
     // MARK: - Button Actions
 
     @objc private func handleClipButtonClicked() {
@@ -88,6 +122,7 @@ public final class StatusBarManager: NSObject {
             popover.performClose(nil)
         } else {
             speedPopover?.performClose(nil)
+            batteryPopover?.performClose(nil)
             clipViewModel?.refreshClips()
             clipPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApplication.shared.activate(ignoringOtherApps: true)
@@ -101,7 +136,22 @@ public final class StatusBarManager: NSObject {
             popover.performClose(nil)
         } else {
             clipPopover?.performClose(nil)
+            batteryPopover?.performClose(nil)
             speedPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+    }
+
+    @objc private func handleBatteryButtonClicked() {
+        guard let button = batteryStatusItem?.button else { return }
+
+        if let popover = batteryPopover, popover.isShown {
+            popover.performClose(nil)
+        } else {
+            clipPopover?.performClose(nil)
+            speedPopover?.performClose(nil)
+            batteryViewModel?.refresh()
+            batteryPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
     }
@@ -124,6 +174,22 @@ public final class StatusBarManager: NSObject {
         button.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium)
     }
 
+    private func observeBatteryUpdates() {
+        guard let batteryVM = batteryViewModel else { return }
+        batteryVM.$telemetry
+            .receive(on: RunLoop.main)
+            .sink { [weak self] telemetry in
+                self?.updateBatteryTitle(telemetry.menuBarTitle)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func updateBatteryTitle(_ title: String) {
+        guard let button = batteryStatusItem?.button else { return }
+        button.title = title
+        button.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium)
+    }
+
     private func observeSettings() {
         guard let clipVM = clipViewModel else { return }
         clipVM.$settings
@@ -131,6 +197,7 @@ public final class StatusBarManager: NSObject {
             .sink { [weak self] settings in
                 self?.clipStatusItem?.isVisible = settings.isClipboardEnabled
                 self?.speedStatusItem?.isVisible = settings.isSpeedMeterEnabled
+                self?.batteryStatusItem?.isVisible = settings.isBatteryLimiterEnabled
             }
             .store(in: &cancellables)
     }

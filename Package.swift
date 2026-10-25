@@ -9,6 +9,7 @@ let package = Package(
     products: [
         .library(name: "ClipCore", targets: ["ClipCore"]),
         .library(name: "NetCore", targets: ["NetCore"]),
+        .library(name: "PowerCore", targets: ["PowerCore"]),
         .executable(name: "NotchKit", targets: ["NotchKit"]),
         .executable(name: "clip", targets: ["clip"])
     ],
@@ -31,11 +32,17 @@ let package = Package(
             ],
             path: "Sources/NetCore"
         ),
+        .target(
+            name: "PowerCore",
+            dependencies: [],
+            path: "Sources/PowerCore"
+        ),
         .executableTarget(
             name: "NotchKit",
             dependencies: [
                 "ClipCore",
-                "NetCore"
+                "NetCore",
+                "PowerCore"
             ],
             path: "Sources/NotchKit"
         ),
@@ -60,6 +67,13 @@ let package = Package(
                 "NetCore"
             ],
             path: "Tests/NetCoreTests"
+        ),
+        .testTarget(
+            name: "PowerCoreTests",
+            dependencies: [
+                "PowerCore"
+            ],
+            path: "Tests/PowerCoreTests"
         )
     ]
 )

@@ -15,6 +15,9 @@ public struct AppSettings: Codable, FetchableRecord, PersistableRecord, TableRec
     /// Tool visibility toggles
     public var isSpeedMeterEnabled: Bool
     public var isClipboardEnabled: Bool
+    public var isBatteryLimiterEnabled: Bool
+    /// Battery charge threshold limit (e.g. 80%)
+    public var batteryChargeLimit: Int
 
     public init(
         id: Int64 = primaryKeyId,
@@ -23,7 +26,9 @@ public struct AppSettings: Codable, FetchableRecord, PersistableRecord, TableRec
         isPaused: Bool = false,
         ignoreConcealed: Bool = true,
         isSpeedMeterEnabled: Bool = true,
-        isClipboardEnabled: Bool = true
+        isClipboardEnabled: Bool = true,
+        isBatteryLimiterEnabled: Bool = true,
+        batteryChargeLimit: Int = 80
     ) {
         self.id = id
         self.maxHistory = maxHistory
@@ -32,6 +37,8 @@ public struct AppSettings: Codable, FetchableRecord, PersistableRecord, TableRec
         self.ignoreConcealed = ignoreConcealed
         self.isSpeedMeterEnabled = isSpeedMeterEnabled
         self.isClipboardEnabled = isClipboardEnabled
+        self.isBatteryLimiterEnabled = isBatteryLimiterEnabled
+        self.batteryChargeLimit = batteryChargeLimit
     }
 
     public static let `default` = AppSettings()
@@ -44,5 +51,7 @@ public struct AppSettings: Codable, FetchableRecord, PersistableRecord, TableRec
         public static let ignoreConcealed = Column(CodingKeys.ignoreConcealed)
         public static let isSpeedMeterEnabled = Column(CodingKeys.isSpeedMeterEnabled)
         public static let isClipboardEnabled = Column(CodingKeys.isClipboardEnabled)
+        public static let isBatteryLimiterEnabled = Column(CodingKeys.isBatteryLimiterEnabled)
+        public static let batteryChargeLimit = Column(CodingKeys.batteryChargeLimit)
     }
 }

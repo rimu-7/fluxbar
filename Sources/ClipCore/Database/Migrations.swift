@@ -172,6 +172,17 @@ public enum Migrations {
             }
         }
 
+        migrator.registerMigration("v6_battery_limiter") { db in
+            let settingsCols = try db.columns(in: "app_settings")
+            let colNames = Set(settingsCols.map(\.name))
+            if !colNames.contains("isBatteryLimiterEnabled") {
+                try db.execute(sql: "ALTER TABLE app_settings ADD COLUMN isBatteryLimiterEnabled BOOLEAN NOT NULL DEFAULT 1;")
+            }
+            if !colNames.contains("batteryChargeLimit") {
+                try db.execute(sql: "ALTER TABLE app_settings ADD COLUMN batteryChargeLimit INTEGER NOT NULL DEFAULT 80;")
+            }
+        }
+
         return migrator
     }
 }

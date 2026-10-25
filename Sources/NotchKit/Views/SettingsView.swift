@@ -14,6 +14,8 @@ public struct SettingsView: View {
 
     @State private var isClipboardEnabled: Bool
     @State private var isSpeedMeterEnabled: Bool
+    @State private var isBatteryLimiterEnabled: Bool
+    @State private var batteryChargeLimit: Int
 
     @State private var isCustomRetention: Bool = false
     @State private var customRetentionDays: Int = 35
@@ -58,6 +60,8 @@ public struct SettingsView: View {
         _maxHistory = State(initialValue: currentSettings.maxHistory)
         _isClipboardEnabled = State(initialValue: currentSettings.isClipboardEnabled)
         _isSpeedMeterEnabled = State(initialValue: currentSettings.isSpeedMeterEnabled)
+        _isBatteryLimiterEnabled = State(initialValue: currentSettings.isBatteryLimiterEnabled)
+        _batteryChargeLimit = State(initialValue: currentSettings.batteryChargeLimit)
 
         let isStandardRetention = [1, 7, 30, 90, 365, 0].contains(currentSettings.retentionDays)
         _isCustomRetention = State(initialValue: !isStandardRetention)
@@ -218,6 +222,44 @@ public struct SettingsView: View {
                             }
                             var updated = viewModel.settings
                             updated.isSpeedMeterEnabled = newValue
+                            viewModel.updateSettings(updated)
+                        }
+                }
+                .padding(.vertical, 8)
+
+                Divider().opacity(0.15).padding(.leading, 37)
+
+                // 3. Battery Charge Limiter Tool Toggle
+                HStack(spacing: 11) {
+                    Image(systemName: "bolt.batteryblock.fill")
+                        .font(.system(size: 15))
+                        .foregroundColor(.teal)
+                        .frame(width: 26, height: 26)
+                        .background(Color.teal.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Battery Charge Limiter")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.primary)
+                        Text("Cap charging (e.g. 80%) & switch power directly to adapter.")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Toggle("", isOn: $isBatteryLimiterEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .onChange(of: isBatteryLimiterEnabled) { newValue in
+                            if !newValue && !isClipboardEnabled && !isSpeedMeterEnabled {
+                                isBatteryLimiterEnabled = true
+                                return
+                            }
+                            var updated = viewModel.settings
+                            updated.isBatteryLimiterEnabled = newValue
                             viewModel.updateSettings(updated)
                         }
                 }

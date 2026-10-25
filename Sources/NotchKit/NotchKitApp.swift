@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import ClipCore
 import NetCore
+import PowerCore
 
 @main
 struct NotchKitApp: App {
@@ -22,15 +23,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start background pasteboard monitoring
         PasteboardService.shared.startMonitoring()
 
-        // Set up rock-solid native AppKit status items for Clipboard & Speed Meter
+        // Set up rock-solid native AppKit status items for Clipboard, Speed Meter & Battery Limiter
         StatusBarManager.shared.setup(
             clipViewModel: ClipBarViewModel.shared,
-            speedViewModel: SpeedMeterViewModel.shared
+            speedViewModel: SpeedMeterViewModel.shared,
+            batteryViewModel: BatteryViewModel.shared
         )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         PasteboardService.shared.stopMonitoring()
         NetworkSpeedMonitor.shared.stopMonitoring()
+        BatteryMonitor.shared.stopMonitoring()
     }
 }
