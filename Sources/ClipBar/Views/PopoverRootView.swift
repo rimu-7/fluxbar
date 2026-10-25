@@ -20,7 +20,7 @@ public struct PopoverRootView: View {
                 mainContentView
             }
         }
-        .frame(width: 390, height: 520)
+        .frame(width: 440, height: 590)
         .background {
             // Hardware-accelerated macOS frosted glass vibrancy
             VisualEffectView(material: .popover, blendingMode: .behindWindow, state: .active)
