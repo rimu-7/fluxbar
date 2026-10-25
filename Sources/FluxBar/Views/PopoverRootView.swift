@@ -4,7 +4,6 @@ import ClipCore
 
 public struct PopoverRootView: View {
     @ObservedObject public var viewModel: ClipBarViewModel
-    @FocusState private var isSearchFocused: Bool
     @State private var keyMonitor: Any?
     private let refreshTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
@@ -24,7 +23,6 @@ public struct PopoverRootView: View {
         .onAppear {
             PasteboardService.shared.checkForChanges()
             viewModel.refreshClips()
-            isSearchFocused = true
             setupKeyboardMonitor()
         }
         .onReceive(refreshTimer) { _ in
@@ -46,13 +44,27 @@ public struct PopoverRootView: View {
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.accentColor.opacity(0.9))
 
-                        TextField("Search clips (FTS5)...", text: $viewModel.searchQuery)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12.5))
-                            .focused($isSearchFocused)
-                            .onSubmit {
+                        NoAutoFillSearchField(
+                            placeholder: "Search clips (FTS5)...",
+                            text: $viewModel.searchQuery,
+                            onSubmit: {
                                 viewModel.copySelected()
+                            },
+                            onArrowDown: {
+                                viewModel.selectNext()
+                            },
+                            onArrowUp: {
+                                viewModel.selectPrevious()
+                            },
+                            onEscape: {
+                                if !viewModel.searchQuery.isEmpty {
+                                    viewModel.searchQuery = ""
+                                } else {
+                                    StatusBarManager.shared.closePopover()
+                                }
                             }
+                        )
+                        .frame(height: 20)
 
                         if !viewModel.searchQuery.isEmpty {
                             Button(action: { viewModel.searchQuery = "" }) {
