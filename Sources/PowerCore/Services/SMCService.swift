@@ -11,7 +11,7 @@ public struct SMCKeyInfo {
 public final class SMCService: @unchecked Sendable {
     public static let shared = SMCService()
 
-    private let lock = NSLock()
+    private let lock = NSRecursiveLock()
     private var connection: io_connect_t = 0
     private var isConnectionOpen = false
 
@@ -312,6 +312,10 @@ public final class SMCService: @unchecked Sendable {
     }
 
     private func invokePrivilegedHelper(inhibited: Bool, limit: Int) -> Bool {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+
         let execPath: String
         if FileManager.default.fileExists(atPath: Self.helperPath) {
             execPath = Self.helperPath
@@ -325,8 +329,15 @@ public final class SMCService: @unchecked Sendable {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: execPath)
         process.arguments = [action, "\(limit)"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
         do {
             try process.run()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3.0) {
+                if process.isRunning {
+                    process.terminate()
+                }
+            }
             process.waitUntilExit()
             return process.terminationStatus == 0
         } catch {

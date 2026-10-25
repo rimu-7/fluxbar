@@ -6,14 +6,14 @@ import PowerCore
 import Combine
 
 @MainActor
-public final class StatusBarManager: NSObject {
+public final class StatusBarManager: NSObject, ObservableObject {
     public static let shared = StatusBarManager()
 
     private var clipStatusItem: NSStatusItem?
     private var speedStatusItem: NSStatusItem?
 
     private var unifiedPopover: NSPopover?
-    public var selectedTab: NotchKitTab = .clipboard
+    @Published public var selectedTab: NotchKitTab = .clipboard
 
     private var cancellables = Set<AnyCancellable>()
     private var clipViewModel: ClipBarViewModel?
@@ -56,17 +56,14 @@ public final class StatusBarManager: NSObject {
             clipVM: clipVM,
             speedVM: speedVM,
             batteryVM: batteryVM,
-            selectedTab: Binding(
-                get: { [weak self] in self?.selectedTab ?? .clipboard },
-                set: { [weak self] in self?.selectedTab = $0 }
-            )
+            statusManager: self
         )
         popover.contentViewController = NSHostingController(rootView: rootView)
         self.unifiedPopover = popover
     }
 
     public func closePopover() {
-        unifiedPopover?.performClose(nil)
+        unifiedPopover?.close()
     }
 
     // MARK: - Status Items (Only Copy Icon & Speed Meter in Menu Bar)
@@ -104,12 +101,17 @@ public final class StatusBarManager: NSObject {
     @objc private func handleClipButtonClicked() {
         guard let button = clipStatusItem?.button else { return }
 
-        if let popover = unifiedPopover, popover.isShown && selectedTab == .clipboard {
-            popover.performClose(nil)
-        } else {
+        if let popover = unifiedPopover {
+            if popover.isShown {
+                if selectedTab == .clipboard {
+                    popover.close()
+                    return
+                }
+                popover.close()
+            }
             selectedTab = .clipboard
             clipViewModel?.refreshClips()
-            unifiedPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
     }
@@ -117,11 +119,16 @@ public final class StatusBarManager: NSObject {
     @objc private func handleSpeedButtonClicked() {
         guard let button = speedStatusItem?.button else { return }
 
-        if let popover = unifiedPopover, popover.isShown && selectedTab == .speedMeter {
-            popover.performClose(nil)
-        } else {
+        if let popover = unifiedPopover {
+            if popover.isShown {
+                if selectedTab == .speedMeter {
+                    popover.close()
+                    return
+                }
+                popover.close()
+            }
             selectedTab = .speedMeter
-            unifiedPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
     }
@@ -133,7 +140,7 @@ public final class StatusBarManager: NSObject {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 if event.keyCode == 53 { // ESC key
                     if let popover = self?.unifiedPopover, popover.isShown {
-                        popover.performClose(nil)
+                        popover.close()
                         return nil
                     }
                 }

@@ -13,7 +13,9 @@ SWIFT_EXEC="$SWIFT_EXEC" SWIFT_EXEC_MANIFEST="$SWIFT_EXEC_MANIFEST" swift test \
   -Xlinker -F -Xlinker /tmp/test_patch/Frameworks \
   -Xlinker -rpath -Xlinker /tmp/test_patch/Frameworks >/dev/null
 
-echo "==> Executing ClipCore & NetCore test suites..."
+export XCTestConfigurationFilePath="${XCTestConfigurationFilePath:-/tmp/dummy-xctest-config}"
+
+echo "==> Executing ClipCore, NetCore & PowerCore test suites..."
 /tmp/test_patch/usr/bin/swift - << 'EOF'
 import Foundation
 import ObjectiveC

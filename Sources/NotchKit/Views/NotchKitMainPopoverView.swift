@@ -28,20 +28,19 @@ public struct NotchKitMainPopoverView: View {
     @ObservedObject var clipVM: ClipBarViewModel
     @ObservedObject var speedVM: SpeedMeterViewModel
     @ObservedObject var batteryVM: BatteryViewModel
-
-    @Binding var selectedTab: NotchKitTab
+    @ObservedObject var statusManager: StatusBarManager
 
     @MainActor
     public init(
         clipVM: ClipBarViewModel,
         speedVM: SpeedMeterViewModel,
         batteryVM: BatteryViewModel,
-        selectedTab: Binding<NotchKitTab>
+        statusManager: StatusBarManager
     ) {
         self.clipVM = clipVM
         self.speedVM = speedVM
         self.batteryVM = batteryVM
-        self._selectedTab = selectedTab
+        self.statusManager = statusManager
     }
 
     public var body: some View {
@@ -74,7 +73,7 @@ public struct NotchKitMainPopoverView: View {
 
                     // Tab Content Switcher
                     Group {
-                        switch selectedTab {
+                        switch statusManager.selectedTab {
                         case .clipboard:
                             PopoverRootView(viewModel: clipVM)
                         case .battery:
@@ -110,10 +109,10 @@ public struct NotchKitMainPopoverView: View {
             // Segmented Glass Tab Switcher (Order: Clipboard -> Battery -> Speed Meter)
             HStack(spacing: 2) {
                 ForEach(NotchKitTab.allCases) { tab in
-                    let isSelected = selectedTab == tab
+                    let isSelected = statusManager.selectedTab == tab
                     Button(action: {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                            selectedTab = tab
+                            statusManager.selectedTab = tab
                         }
                     }) {
                         HStack(spacing: 5) {

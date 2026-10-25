@@ -18,7 +18,7 @@ public final class ChargeLimiter: @unchecked Sendable {
     private let smcService: SMCService
     private let monitor: BatteryMonitor
     private var cancellables = Set<AnyCancellable>()
-    private let lock = NSLock()
+    private let lock = NSRecursiveLock()
 
     public init(
         smcService: SMCService = .shared,
@@ -47,7 +47,7 @@ public final class ChargeLimiter: @unchecked Sendable {
         self.chargeLimit = max(50, min(100, limit))
         self.hysteresis = max(1, min(5, hysteresis))
 
-        evaluateCurrentState(telemetry: monitor.currentTelemetry)
+        evaluateCurrentStateUnlocked(telemetry: monitor.currentTelemetry)
     }
 
     public func setChargeLimit(_ limit: Int) {
@@ -72,7 +72,10 @@ public final class ChargeLimiter: @unchecked Sendable {
     public func evaluateCurrentState(telemetry: BatteryTelemetry) {
         lock.lock()
         defer { lock.unlock() }
+        evaluateCurrentStateUnlocked(telemetry: telemetry)
+    }
 
+    private func evaluateCurrentStateUnlocked(telemetry: BatteryTelemetry) {
         guard isLimiterEnabled && chargeLimit < 100 else {
             // Limiter disabled or set to 100% -> resume full normal charging
             if isAdapterBypassActive {

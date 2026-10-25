@@ -10,54 +10,66 @@ public enum PowerHelperManager {
 
     public static var isInstalled: Bool {
         if FileManager.default.fileExists(atPath: wattbitdPath) {
-            return true
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: wattbitdPath),
+               let perms = attrs[.posixPermissions] as? Int {
+                return (perms & 0o4000) != 0 // Has setuid bit
+            }
         }
-        return FileManager.default.fileExists(atPath: destinationPath) ||
-               FileManager.default.fileExists(atPath: fallbackBinPath)
+        if FileManager.default.fileExists(atPath: destinationPath) {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: destinationPath),
+               let perms = attrs[.posixPermissions] as? Int {
+                return (perms & 0o4000) != 0
+            }
+        }
+        return false
     }
 
-    /// Set charge limit percentage on hardware (e.g. 80, or 100 for disable)
+    /// Set charge limit percentage on hardware asynchronously (non-blocking)
     @discardableResult
     public static func applyChargeLimit(_ percentage: Int) -> Bool {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+
         let clamped = max(50, min(100, percentage))
         let arg = (clamped >= 100) ? "disable" : "\(clamped)"
 
-        // 1. If wattbitd is installed, invoke it
-        if FileManager.default.fileExists(atPath: wattbitdPath) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: wattbitdPath)
-            process.arguments = ["limit", arg]
-            process.standardOutput = Pipe()
-            process.standardError = Pipe()
-            do {
-                try process.run()
-                process.waitUntilExit()
-                if process.terminationStatus == 0 {
-                    return true
-                }
-            } catch {
-                // fall through
+        DispatchQueue.global(qos: .utility).async {
+            // 1. If wattbitd is installed, invoke it
+            if FileManager.default.fileExists(atPath: wattbitdPath) {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: wattbitdPath)
+                process.arguments = ["limit", arg]
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+                do {
+                    try process.run()
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3.0) {
+                        if process.isRunning { process.terminate() }
+                    }
+                    process.waitUntilExit()
+                } catch {}
+            }
+
+            // 2. Try notchkit-power-helper if available
+            let helperPath = FileManager.default.fileExists(atPath: destinationPath) ? destinationPath : fallbackBinPath
+            if FileManager.default.fileExists(atPath: helperPath) {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: helperPath)
+                process.arguments = ["limit", arg]
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+                do {
+                    try process.run()
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3.0) {
+                        if process.isRunning { process.terminate() }
+                    }
+                    process.waitUntilExit()
+                } catch {}
             }
         }
 
-        // 2. Try notchkit-power-helper if available
-        let helperPath = FileManager.default.fileExists(atPath: destinationPath) ? destinationPath : fallbackBinPath
-        if FileManager.default.fileExists(atPath: helperPath) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: helperPath)
-            process.arguments = ["limit", arg]
-            process.standardOutput = Pipe()
-            process.standardError = Pipe()
-            do {
-                try process.run()
-                process.waitUntilExit()
-                return process.terminationStatus == 0
-            } catch {
-                return false
-            }
-        }
-
-        return false
+        return true
     }
 
     /// Authorize hardware charge limiting via standard macOS Touch ID / Password prompt

@@ -29,6 +29,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             speedViewModel: SpeedMeterViewModel.shared,
             batteryViewModel: BatteryViewModel.shared
         )
+
+        print("=======================================================")
+        print("  🚀 NotchKit is running successfully!")
+        print("  • Look at your macOS menu bar (top right) for:")
+        print("    1. Copy icon (Clipboard History)")
+        print("    2. Speed Meter (Live Network Speeds)")
+        print("  • Both icons open the unified UI (Clipboard | Battery | Speed).")
+        print("  • Press Ctrl+C in this terminal to stop.")
+        print("=======================================================")
+        fflush(stdout)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
