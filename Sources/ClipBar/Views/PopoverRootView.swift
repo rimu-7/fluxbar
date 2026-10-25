@@ -84,12 +84,13 @@ public struct PopoverRootView: View {
 
                 // Filter Bar & Clip Count
                 HStack {
-                    Picker("Filter", selection: $viewModel.filterMode) {
+                    Picker("", selection: $viewModel.filterMode) {
                         ForEach(FilterMode.allCases) { mode in
                             Text(mode.rawValue).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
+                    .labelsHidden()
                     .frame(width: 140)
 
                     Spacer()
@@ -199,7 +200,7 @@ public struct PopoverRootView: View {
                 Text("Pin").font(.system(size: 9.5))
             }
             HStack(spacing: 2) {
-                Text("⌘⌫ / ⌫").font(.system(size: 10, weight: .bold))
+                Text("⌘⌫").font(.system(size: 10, weight: .bold))
                 Text("Delete").font(.system(size: 9.5))
             }
             HStack(spacing: 2) {
@@ -248,12 +249,11 @@ public struct PopoverRootView: View {
                 return nil
             }
 
-            // 5. Cmd + Delete (always delete selected) or Delete/Backspace (when search is empty)
-            if event.keyCode == 51 || event.keyCode == 117 {
-                if isCommand || vm.searchQuery.isEmpty {
-                    vm.deleteSelected()
-                    return nil
-                }
+            // 5. Cmd + Delete / Cmd + Backspace: ONLY delete when Cmd modifier is explicitly held
+            // Plain backspace will NEVER delete clips!
+            if isCommand && (event.keyCode == 51 || event.keyCode == 117) {
+                vm.deleteSelected()
+                return nil
             }
 
             // 6. Cmd + 1...9: Quick copy
