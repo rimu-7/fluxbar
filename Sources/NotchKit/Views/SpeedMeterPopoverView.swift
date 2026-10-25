@@ -24,17 +24,7 @@ public struct SpeedMeterPopoverView: View {
                 mainContentView
             }
         }
-        .frame(width: 380, height: 530)
-        .background {
-            VisualEffectView(material: .popover, blendingMode: .behindWindow, state: .active)
-                .overlay {
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.04), Color.clear, Color.black.opacity(0.12)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var mainContentView: some View {

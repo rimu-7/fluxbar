@@ -21,5 +21,12 @@ install-cli: build
 	cp .build/debug/clip /usr/local/bin/clip || cp .build/debug/clip $(HOME)/.local/bin/clip
 	@echo "Installed clip CLI successfully."
 
+install-helper:
+	@if [ -f /Library/PrivilegedHelperTools/wattbitd ]; then \
+		echo "Authorizing wattbitd helper for hardware charge limiting..."; \
+		chmod 4755 /Library/PrivilegedHelperTools/wattbitd 2>/dev/null || sudo chmod 4755 /Library/PrivilegedHelperTools/wattbitd; \
+		echo "✅ Authorized successfully!"; \
+	fi
+
 clean:
 	swift package clean

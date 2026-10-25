@@ -34,10 +34,13 @@ public final class BatteryViewModel: ObservableObject {
 
         let initialTelemetry = monitor.currentTelemetry
         self.telemetry = initialTelemetry
-        self.chargeLimit = limiter.chargeLimit
-        self.isLimiterEnabled = limiter.isLimiterEnabled
+        let initialLimit = ClipBarViewModel.shared.settings.batteryChargeLimit > 0 ? ClipBarViewModel.shared.settings.batteryChargeLimit : limiter.chargeLimit
+        self.chargeLimit = initialLimit
+        self.isLimiterEnabled = ClipBarViewModel.shared.settings.isBatteryLimiterEnabled
         self.isBypassActive = limiter.isAdapterBypassActive
         self.isHelperInstalled = smcService.isHelperInstalled
+
+        limiter.configure(isEnabled: self.isLimiterEnabled, limit: self.chargeLimit)
 
         setupSubscriptions()
         monitor.startMonitoring()
@@ -73,6 +76,22 @@ public final class BatteryViewModel: ObservableObject {
                 self.statusMessage = "Limit reached (\(limit)%). Running directly from Power Adapter."
             }
             .store(in: &cancellables)
+
+        // Sync with ClipBarViewModel settings
+        ClipBarViewModel.shared.$settings
+            .receive(on: RunLoop.main)
+            .sink { [weak self] newSettings in
+                guard let self = self else { return }
+                if self.chargeLimit != newSettings.batteryChargeLimit {
+                    self.chargeLimit = newSettings.batteryChargeLimit
+                    self.limiter.setChargeLimit(newSettings.batteryChargeLimit)
+                }
+                if self.isLimiterEnabled != newSettings.isBatteryLimiterEnabled {
+                    self.isLimiterEnabled = newSettings.isBatteryLimiterEnabled
+                    self.limiter.setEnabled(newSettings.isBatteryLimiterEnabled)
+                }
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Actions
@@ -81,6 +100,7 @@ public final class BatteryViewModel: ObservableObject {
         let clamped = max(50, min(100, newLimit))
         self.chargeLimit = clamped
         limiter.setChargeLimit(clamped)
+        _ = PowerHelperManager.applyChargeLimit(clamped)
 
         // Persist to AppSettings
         var currentSettings = ClipBarViewModel.shared.settings
@@ -91,6 +111,7 @@ public final class BatteryViewModel: ObservableObject {
     public func setLimiterEnabled(_ enabled: Bool) {
         self.isLimiterEnabled = enabled
         limiter.setEnabled(enabled)
+        _ = PowerHelperManager.applyChargeLimit(enabled ? chargeLimit : 100)
 
         // Persist to AppSettings
         var currentSettings = ClipBarViewModel.shared.settings
@@ -106,7 +127,7 @@ public final class BatteryViewModel: ObservableObject {
     public func authorizeHelper() {
         guard !isAuthorizingHelper else { return }
         isAuthorizingHelper = true
-        statusMessage = "Requesting authorization..."
+        statusMessage = "Requesting administrator authorization..."
 
         Task {
             let success = await PowerHelperManager.requestHelperInstallation()
@@ -115,6 +136,7 @@ public final class BatteryViewModel: ObservableObject {
                 self.isHelperInstalled = self.smcService.isHelperInstalled || success
                 if success {
                     self.statusMessage = "Hardware SMC control authorized successfully!"
+                    _ = PowerHelperManager.applyChargeLimit(self.chargeLimit)
                     self.limiter.evaluateCurrentState(telemetry: self.telemetry)
                 } else {
                     self.statusMessage = "Authorization was cancelled or failed."

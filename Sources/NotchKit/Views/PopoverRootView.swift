@@ -20,22 +20,7 @@ public struct PopoverRootView: View {
                 mainContentView
             }
         }
-        .frame(width: 440, height: 590)
-        .background {
-            // Hardware-accelerated macOS frosted glass vibrancy
-            VisualEffectView(material: .popover, blendingMode: .behindWindow, state: .active)
-                .overlay {
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.04),
-                            Color.clear,
-                            Color.black.opacity(0.12)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             PasteboardService.shared.checkForChanges()
             viewModel.refreshClips()

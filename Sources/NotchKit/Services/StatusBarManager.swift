@@ -11,16 +11,15 @@ public final class StatusBarManager: NSObject {
 
     private var clipStatusItem: NSStatusItem?
     private var speedStatusItem: NSStatusItem?
-    private var batteryStatusItem: NSStatusItem?
 
-    private var clipPopover: NSPopover?
-    private var speedPopover: NSPopover?
-    private var batteryPopover: NSPopover?
+    private var unifiedPopover: NSPopover?
+    public var selectedTab: NotchKitTab = .clipboard
 
     private var cancellables = Set<AnyCancellable>()
     private var clipViewModel: ClipBarViewModel?
     private var speedViewModel: SpeedMeterViewModel?
     private var batteryViewModel: BatteryViewModel?
+    private var keyMonitor: Any?
 
     public func setup(
         clipViewModel: ClipBarViewModel,
@@ -31,54 +30,54 @@ public final class StatusBarManager: NSObject {
         self.speedViewModel = speedViewModel
         self.batteryViewModel = batteryViewModel
 
-        setupClipPopover(viewModel: clipViewModel)
-        setupSpeedPopover(speedVM: speedViewModel, clipVM: clipViewModel)
-        setupBatteryPopover(batteryVM: batteryViewModel, clipVM: clipViewModel)
+        setupUnifiedPopover()
 
         setupClipStatusItem()
         setupSpeedStatusItem()
-        setupBatteryStatusItem()
 
         observeSettings()
         observeSpeedUpdates()
-        observeBatteryUpdates()
+        setupEscapeKeyMonitor()
     }
 
-    // MARK: - Popovers
+    // MARK: - Unified Popover
 
-    private func setupClipPopover(viewModel: ClipBarViewModel) {
+    private func setupUnifiedPopover() {
+        guard let clipVM = clipViewModel,
+              let speedVM = speedViewModel,
+              let batteryVM = batteryViewModel else { return }
+
         let popover = NSPopover()
-        popover.contentSize = NSSize(width: 440, height: 590)
+        popover.contentSize = NSSize(width: 440, height: 600)
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: PopoverRootView(viewModel: viewModel))
-        self.clipPopover = popover
+
+        let rootView = NotchKitMainPopoverView(
+            clipVM: clipVM,
+            speedVM: speedVM,
+            batteryVM: batteryVM,
+            selectedTab: Binding(
+                get: { [weak self] in self?.selectedTab ?? .clipboard },
+                set: { [weak self] in self?.selectedTab = $0 }
+            )
+        )
+        popover.contentViewController = NSHostingController(rootView: rootView)
+        self.unifiedPopover = popover
     }
 
-    private func setupSpeedPopover(speedVM: SpeedMeterViewModel, clipVM: ClipBarViewModel) {
-        let popover = NSPopover()
-        popover.contentSize = NSSize(width: 380, height: 530)
-        popover.behavior = .transient
-        popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: SpeedMeterPopoverView(speedVM: speedVM, clipVM: clipVM))
-        self.speedPopover = popover
+    public func closePopover() {
+        unifiedPopover?.performClose(nil)
     }
 
-    private func setupBatteryPopover(batteryVM: BatteryViewModel, clipVM: ClipBarViewModel) {
-        let popover = NSPopover()
-        popover.contentSize = NSSize(width: 380, height: 540)
-        popover.behavior = .transient
-        popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: BatteryPopoverView(batteryVM: batteryVM, clipVM: clipVM))
-        self.batteryPopover = popover
-    }
-
-    // MARK: - Status Items
+    // MARK: - Status Items (Only Copy Icon & Speed Meter in Menu Bar)
 
     private func setupClipStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "paperclip", accessibilityDescription: "NotchKit Clips")
+            // High-precision macOS Copy icon as requested
+            let copyImage = NSImage(systemSymbolName: "doc.on.doc.fill", accessibilityDescription: "NotchKit Clipboard")
+                ?? NSImage(systemSymbolName: "doc.on.clipboard.fill", accessibilityDescription: "NotchKit Clipboard")
+            button.image = copyImage
             button.target = self
             button.action = #selector(handleClipButtonClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -100,31 +99,17 @@ public final class StatusBarManager: NSObject {
         self.speedStatusItem = item
     }
 
-    private func setupBatteryStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = item.button {
-            button.title = "⚡️ 80%"
-            button.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium)
-            button.target = self
-            button.action = #selector(handleBatteryButtonClicked)
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        }
-        item.isVisible = clipViewModel?.settings.isBatteryLimiterEnabled ?? true
-        self.batteryStatusItem = item
-    }
-
     // MARK: - Button Actions
 
     @objc private func handleClipButtonClicked() {
         guard let button = clipStatusItem?.button else { return }
 
-        if let popover = clipPopover, popover.isShown {
+        if let popover = unifiedPopover, popover.isShown && selectedTab == .clipboard {
             popover.performClose(nil)
         } else {
-            speedPopover?.performClose(nil)
-            batteryPopover?.performClose(nil)
+            selectedTab = .clipboard
             clipViewModel?.refreshClips()
-            clipPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            unifiedPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
     }
@@ -132,27 +117,28 @@ public final class StatusBarManager: NSObject {
     @objc private func handleSpeedButtonClicked() {
         guard let button = speedStatusItem?.button else { return }
 
-        if let popover = speedPopover, popover.isShown {
+        if let popover = unifiedPopover, popover.isShown && selectedTab == .speedMeter {
             popover.performClose(nil)
         } else {
-            clipPopover?.performClose(nil)
-            batteryPopover?.performClose(nil)
-            speedPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            selectedTab = .speedMeter
+            unifiedPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
     }
 
-    @objc private func handleBatteryButtonClicked() {
-        guard let button = batteryStatusItem?.button else { return }
+    // MARK: - Escape Key to Close
 
-        if let popover = batteryPopover, popover.isShown {
-            popover.performClose(nil)
-        } else {
-            clipPopover?.performClose(nil)
-            speedPopover?.performClose(nil)
-            batteryViewModel?.refresh()
-            batteryPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApplication.shared.activate(ignoringOtherApps: true)
+    private func setupEscapeKeyMonitor() {
+        if keyMonitor == nil {
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                if event.keyCode == 53 { // ESC key
+                    if let popover = self?.unifiedPopover, popover.isShown {
+                        popover.performClose(nil)
+                        return nil
+                    }
+                }
+                return event
+            }
         }
     }
 
@@ -174,22 +160,6 @@ public final class StatusBarManager: NSObject {
         button.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium)
     }
 
-    private func observeBatteryUpdates() {
-        guard let batteryVM = batteryViewModel else { return }
-        batteryVM.$telemetry
-            .receive(on: RunLoop.main)
-            .sink { [weak self] telemetry in
-                self?.updateBatteryTitle(telemetry.menuBarTitle)
-            }
-            .store(in: &cancellables)
-    }
-
-    private func updateBatteryTitle(_ title: String) {
-        guard let button = batteryStatusItem?.button else { return }
-        button.title = title
-        button.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium)
-    }
-
     private func observeSettings() {
         guard let clipVM = clipViewModel else { return }
         clipVM.$settings
@@ -197,7 +167,6 @@ public final class StatusBarManager: NSObject {
             .sink { [weak self] settings in
                 self?.clipStatusItem?.isVisible = settings.isClipboardEnabled
                 self?.speedStatusItem?.isVisible = settings.isSpeedMeterEnabled
-                self?.batteryStatusItem?.isVisible = settings.isBatteryLimiterEnabled
             }
             .store(in: &cancellables)
     }

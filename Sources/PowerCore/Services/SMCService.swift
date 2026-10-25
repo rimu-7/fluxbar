@@ -294,6 +294,11 @@ public final class SMCService: @unchecked Sendable {
             return true
         }
 
+        // Apply via PowerHelperManager (wattbitd or notchkit helper)
+        if PowerHelperManager.applyChargeLimit(inhibited ? limitPercentage : 100) {
+            return true
+        }
+
         // If direct write was unprivileged, invoke privileged helper if available
         return invokePrivilegedHelper(inhibited: inhibited, limit: limitPercentage)
     }
@@ -303,8 +308,7 @@ public final class SMCService: @unchecked Sendable {
     public static let fallbackHelperPath = "/usr/local/bin/notchkit-power-helper"
 
     public var isHelperInstalled: Bool {
-        FileManager.default.fileExists(atPath: Self.helperPath) ||
-        FileManager.default.fileExists(atPath: Self.fallbackHelperPath)
+        PowerHelperManager.isInstalled
     }
 
     private func invokePrivilegedHelper(inhibited: Bool, limit: Int) -> Bool {

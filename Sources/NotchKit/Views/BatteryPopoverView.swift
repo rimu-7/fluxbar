@@ -23,108 +23,17 @@ public struct BatteryPopoverView: View {
     }
 
     public var body: some View {
-        ZStack {
-            VisualEffectView(material: .popover, blendingMode: .behindWindow)
-                .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                headerView
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .padding(.bottom, 12)
-
-                Divider().opacity(0.12)
-
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 14) {
-                        heroBatteryCard
-                        chargeLimitCard
-                        diagnosticsGrid
-                        hardwareHelperCard
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                }
-
-                Divider().opacity(0.12)
-
-                footerView
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 14) {
+                heroBatteryCard
+                chargeLimitCard
+                diagnosticsGrid
+                hardwareHelperCard
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
         }
-        .frame(width: 380, height: 540)
-    }
-
-    // MARK: - Header
-
-    private var headerView: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(statusAccentColor.opacity(0.16))
-                    .frame(width: 32, height: 32)
-                Image(systemName: batteryVM.telemetry.menuBarSymbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(statusAccentColor)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text("Battery Charge Limiter")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-
-                    if batteryVM.isBypassActive {
-                        Text("BYPASS")
-                            .font(.system(size: 9, weight: .heavy))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1.5)
-                            .background(
-                                Capsule()
-                                    .fill(LinearGradient(
-                                        colors: [Color.green, Color.teal],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    ))
-                            )
-                    }
-                }
-
-                Text(statusSubtitle)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            Button(action: {
-                batteryVM.refresh()
-            }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .padding(6)
-                    .background(Color.white.opacity(0.06))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Refresh Battery Telemetry")
-
-            Button(action: {
-                clipVM.showingSettings = true
-            }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .padding(6)
-                    .background(Color.white.opacity(0.06))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Open NotchKit Settings")
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Hero Battery Card
@@ -264,13 +173,15 @@ public struct BatteryPopoverView: View {
                     ForEach(batteryVM.availablePresets, id: \.self) { preset in
                         let isSelected = batteryVM.chargeLimit == preset
                         Button(action: {
-                            batteryVM.setChargeLimit(preset)
+                            withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                                batteryVM.setChargeLimit(preset)
+                            }
                         }) {
                             Text(preset == 100 ? "100%" : "\(preset)%")
                                 .font(.system(size: 11, weight: isSelected ? .bold : .medium))
                                 .foregroundColor(isSelected ? .white : .primary)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 5)
+                                .padding(.vertical, 6)
                                 .background(
                                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                                         .fill(isSelected ? statusAccentColor : (hoveredPreset == preset ? Color.white.opacity(0.09) : Color.white.opacity(0.045)))
@@ -376,72 +287,55 @@ public struct BatteryPopoverView: View {
     // MARK: - Hardware Helper Card
 
     private var hardwareHelperCard: some View {
-        HStack(spacing: 10) {
-            Image(systemName: batteryVM.isHelperInstalled ? "checkmark.shield.fill" : "lock.shield")
-                .font(.system(size: 16))
-                .foregroundColor(batteryVM.isHelperInstalled ? .green : .orange)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: batteryVM.isHelperInstalled ? "checkmark.shield.fill" : "lock.shield")
+                    .font(.system(size: 16))
+                    .foregroundColor(batteryVM.isHelperInstalled ? .green : .orange)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(batteryVM.isHelperInstalled ? "Hardware SMC Limiter: Active" : "Hardware Bypass Control")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundColor(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(batteryVM.isHelperInstalled ? "Hardware SMC Limiter: Active" : "Hardware Bypass Control")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundColor(.primary)
 
-                Text(batteryVM.isHelperInstalled ? "Power adapter bypass enforced via hardware." : "One-time authorization enables native SMC charge cutoff.")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    Text(batteryVM.isHelperInstalled ? "Apple Silicon charge limit enforced via kernel SMC." : "Touch ID authorization enables low-level SMC charge cutoff.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                if !batteryVM.isHelperInstalled {
+                    Button(action: {
+                        batteryVM.authorizeHelper()
+                    }) {
+                        Text(batteryVM.isAuthorizingHelper ? "Authorizing..." : "Authorize")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.orange)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(batteryVM.isAuthorizingHelper)
+                }
             }
 
-            Spacer()
-
-            if !batteryVM.isHelperInstalled {
-                Button(action: {
-                    batteryVM.authorizeHelper()
-                }) {
-                    Text(batteryVM.isAuthorizingHelper ? "Authorizing..." : "Authorize")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Color.orange)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(batteryVM.isAuthorizingHelper)
+            if let message = batteryVM.statusMessage {
+                Text(message)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(message.contains("success") ? .green : (message.contains("Limit reached") ? .teal : .orange))
+                    .padding(.top, 2)
             }
         }
-        .padding(10)
+        .padding(12)
         .background(Color.white.opacity(0.035))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
         )
-    }
-
-    // MARK: - Footer
-
-    private var footerView: some View {
-        HStack {
-            Button(action: {
-                clipVM.showingSettings = true
-            }) {
-                Label("NotchKit Settings", systemImage: "slider.horizontal.3")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            Button(action: {
-                NSApplication.shared.terminate(nil)
-            }) {
-                Text("Quit")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
-        }
     }
 
     // MARK: - Computed Styles
@@ -455,18 +349,6 @@ public struct BatteryPopoverView: View {
             return .red
         } else {
             return .blue
-        }
-    }
-
-    private var statusSubtitle: String {
-        if batteryVM.isBypassActive {
-            return "Adapter Power • Battery Preserved"
-        } else if batteryVM.telemetry.isCharging {
-            return batteryVM.telemetry.formattedRemainingTime
-        } else if batteryVM.telemetry.isPluggedIn {
-            return "Connected to AC Power"
-        } else {
-            return batteryVM.telemetry.formattedRemainingTime
         }
     }
 
