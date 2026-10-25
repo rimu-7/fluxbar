@@ -254,6 +254,14 @@ public final class SMCService: @unchecked Sendable {
         return writeBytes(keyStr, bytes: [value])
     }
 
+    public func writeUInt32(_ keyStr: String, value: UInt32) -> Bool {
+        let b0 = UInt8(value & 0xFF)
+        let b1 = UInt8((value >> 8) & 0xFF)
+        let b2 = UInt8((value >> 16) & 0xFF)
+        let b3 = UInt8((value >> 24) & 0xFF)
+        return writeBytes(keyStr, bytes: [b0, b1, b2, b3])
+    }
+
     private func openConnectionInternal() -> Bool {
         if isConnectionOpen && connection != 0 {
             return true
@@ -272,35 +280,102 @@ public final class SMCService: @unchecked Sendable {
         return false
     }
 
-    // MARK: - Charge Limiter Hardware Inhibit & Resume
+    // MARK: - Multi-Generation Hardware Detection
 
-    /// Inhibit battery charging so Mac bypasses battery and runs on AC adapter
+    public enum SMCHardwareGeneration: String, Sendable {
+        case appleSiliconM2M3M4 = "Apple Silicon M2/M3/M4 (CHTE)"
+        case appleSiliconM1     = "Apple Silicon M1 (CH0B/CH0C)"
+        case intelBCLM          = "Intel Mac (BCLM)"
+        case universalFallback  = "Universal Fallback"
+    }
+
+    /// Automatically probes the AppleSMC IOKit service to determine the active architecture
+    public var detectedHardwareGeneration: SMCHardwareGeneration {
+        if getKeyInfo("CHTE") != nil {
+            return .appleSiliconM2M3M4
+        } else if getKeyInfo("CH0B") != nil {
+            return .appleSiliconM1
+        } else if getKeyInfo("BCLM") != nil {
+            return .intelBCLM
+        }
+        return .appleSiliconM2M3M4
+    }
+
+    // MARK: - Charge Limiter Hardware Matrix & AC Bypass
+
+    /// Controls battery charging cutoff across all Apple Silicon and Intel generations
     @discardableResult
-    public func setChargingInhibited(_ inhibited: Bool, limitPercentage: Int = 80) -> Bool {
-        let inhibitByte: UInt8 = inhibited ? 0x01 : 0x00
-        let enableByte: UInt8 = inhibited ? 0x00 : 0x01
-        let limitByte: UInt8 = UInt8(clamping: limitPercentage)
+    public func setChargingInhibited(
+        _ inhibited: Bool,
+        limitPercentage: Int = 80,
+        forceDischarge: Bool = false
+    ) -> Bool {
+        let limitByte = UInt8(clamping: limitPercentage)
+        var success = false
 
-        var directSuccess = false
+        let gen = detectedHardwareGeneration
 
-        // Attempt direct SMC write (succeeds if running as root or with elevated entitlements)
-        if writeUInt8("CHIB", value: inhibitByte) { directSuccess = true }
-        if writeUInt8("CHCE", value: enableByte) { directSuccess = true }
-        if writeUInt8("CHIE", value: inhibitByte) { directSuccess = true }
-        if writeUInt8("B0CM", value: limitByte) { directSuccess = true }
-        if writeUInt8("BCLM", value: limitByte) { directSuccess = true }
+        switch gen {
+        case .appleSiliconM2M3M4:
+            // CHTE = 01 00 00 00 to inhibit, 00 00 00 00 to enable
+            let chteBytes: [UInt8] = inhibited ? [0x01, 0x00, 0x00, 0x00] : [0x00, 0x00, 0x00, 0x00]
+            if writeBytes("CHTE", bytes: chteBytes) { success = true }
 
-        if directSuccess {
+            // Force discharge on AC if requested (CHIE = 01)
+            if forceDischarge {
+                _ = writeUInt8("CHIE", value: 0x01)
+            } else if !inhibited {
+                _ = writeUInt8("CHIE", value: 0x00)
+            }
+
+            // MagSafe 3 LED sync (ACLC: 03 = Green / Bypass, 00 = Auto / Amber)
+            _ = writeUInt8("ACLC", value: inhibited ? 0x03 : 0x00)
+
+        case .appleSiliconM1:
+            // CH0B & CH0C = 02 to inhibit, 00 to enable
+            let m1Byte: UInt8 = inhibited ? 0x02 : 0x00
+            if writeUInt8("CH0B", value: m1Byte) { success = true }
+            if writeUInt8("CH0C", value: m1Byte) { success = true }
+
+            // Force discharge on AC if requested (CH0I = 01)
+            if forceDischarge {
+                _ = writeUInt8("CH0I", value: 0x01)
+            } else if !inhibited {
+                _ = writeUInt8("CH0I", value: 0x00)
+            }
+
+            // MagSafe 3 LED sync
+            _ = writeUInt8("ACLC", value: inhibited ? 0x03 : 0x00)
+
+        case .intelBCLM, .universalFallback:
+            // Intel BCLM = limitByte (e.g. 80) to inhibit, 100 to enable
+            let bclmVal: UInt8 = inhibited ? limitByte : 100
+            if writeUInt8("BCLM", value: bclmVal) { success = true }
+            if writeUInt8("B0CM", value: bclmVal) { success = true }
+        }
+
+        // Also update legacy/fallback keys for maximum hardware compatibility
+        let inhibitBit: UInt8 = inhibited ? 0x01 : 0x00
+        let enableBit: UInt8 = inhibited ? 0x00 : 0x01
+        _ = writeUInt8("CHIB", value: inhibitBit)
+        _ = writeUInt8("CHCE", value: enableBit)
+
+        if success {
             return true
         }
 
-        // Apply via PowerHelperManager (wattbitd or notchkit helper)
+        // Apply via PowerHelperManager (wattbitd or notchkit helper daemon)
         if PowerHelperManager.applyChargeLimit(inhibited ? limitPercentage : 100) {
             return true
         }
 
-        // If direct write was unprivileged, invoke privileged helper if available
         return invokePrivilegedHelper(inhibited: inhibited, limit: limitPercentage)
+    }
+
+    /// Sets MagSafe 3 LED color (Green = 0x03, Amber/Auto = 0x00)
+    @discardableResult
+    public func setMagSafeLED(green: Bool) -> Bool {
+        return writeUInt8("ACLC", value: green ? 0x03 : 0x00)
     }
 
     /// Path where the privileged power helper is installed

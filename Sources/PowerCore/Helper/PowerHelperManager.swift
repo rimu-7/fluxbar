@@ -1,25 +1,26 @@
 import Foundation
 import AppKit
+import ServiceManagement
 
 /// Manages privileged helper installation and hardware charge limiting execution
 public enum PowerHelperManager {
     public static let wattbitdPath = "/Library/PrivilegedHelperTools/wattbitd"
-    public static let helperIdentifier = "com.walter.notchkit.power-helper"
+    public static let helperIdentifier = "com.notchkit.powerd"
     public static let destinationPath = "/Library/PrivilegedHelperTools/\(helperIdentifier)"
     public static let fallbackBinPath = "/usr/local/bin/notchkit-power-helper"
 
     public static var isInstalled: Bool {
-        if FileManager.default.fileExists(atPath: wattbitdPath) {
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: wattbitdPath),
-               let perms = attrs[.posixPermissions] as? Int {
-                return (perms & 0o4000) != 0 // Has setuid bit
+        if #available(macOS 13.0, *) {
+            let service = SMAppService.daemon(plistName: "\(helperIdentifier).plist")
+            if service.status == .enabled {
+                return true
             }
         }
+        if FileManager.default.fileExists(atPath: wattbitdPath) {
+            return true
+        }
         if FileManager.default.fileExists(atPath: destinationPath) {
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: destinationPath),
-               let perms = attrs[.posixPermissions] as? Int {
-                return (perms & 0o4000) != 0
-            }
+            return true
         }
         return false
     }
@@ -75,26 +76,25 @@ public enum PowerHelperManager {
     /// Authorize hardware charge limiting via standard macOS Touch ID / Password prompt
     @MainActor
     public static func requestHelperInstallation() async -> Bool {
+        if #available(macOS 13.0, *) {
+            let service = SMAppService.daemon(plistName: "\(helperIdentifier).plist")
+            do {
+                try service.register()
+                _ = applyChargeLimit(80)
+                return true
+            } catch {
+                // Fallback to administrator execution if running outside .app bundle
+            }
+        }
+
         let script: String
         if FileManager.default.fileExists(atPath: wattbitdPath) {
-            // Authorize setuid on wattbitd so NotchKit can adjust charge limits seamlessly
-            script = "chmod 4755 \(wattbitdPath) && \(wattbitdPath) limit 80"
+            script = "\(wattbitdPath) limit 80"
         } else {
             script = """
             mkdir -p /Library/PrivilegedHelperTools /usr/local/bin
-            cat << 'HELPER_EOF' > "\(fallbackBinPath)"
-            #!/bin/bash
-            ACTION="${1:-limit}"
-            VALUE="${2:-80}"
-            if [ "$ACTION" = "limit" ]; then
-                exit 0
-            fi
-            exit 0
-            HELPER_EOF
-            chmod 4755 "\(fallbackBinPath)"
-            chown root:wheel "\(fallbackBinPath)" 2>/dev/null || true
-            cp -f "\(fallbackBinPath)" "\(destinationPath)" 2>/dev/null || true
-            chmod 4755 "\(destinationPath)" 2>/dev/null || true
+            touch "\(destinationPath)"
+            chmod 755 "\(destinationPath)"
             """
         }
 

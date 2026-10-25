@@ -18,8 +18,9 @@ run-bar: run
 
 install-cli: build
 	mkdir -p /usr/local/bin 2>/dev/null || true
-	cp .build/debug/clip /usr/local/bin/clip || cp .build/debug/clip $(HOME)/.local/bin/clip
-	@echo "Installed clip CLI successfully."
+	cp .build/debug/nkit /usr/local/bin/nkit 2>/dev/null || cp .build/debug/nkit $(HOME)/.local/bin/nkit
+	cp .build/debug/clip /usr/local/bin/clip 2>/dev/null || cp .build/debug/clip $(HOME)/.local/bin/clip
+	@echo "✅ Installed 'nkit' and 'clip' CLI utilities successfully."
 
 install-helper:
 	@if [ -f /Library/PrivilegedHelperTools/wattbitd ]; then \

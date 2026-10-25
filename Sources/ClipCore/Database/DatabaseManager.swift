@@ -99,6 +99,13 @@ public final class DatabaseManager: @unchecked Sendable {
         let lineCount = ClipItem.computeLineCount(for: trimmed)
         let now = Date()
 
+        // Externalize large payloads exceeding 100 KB to keep SQLite under 5 MB
+        var storedRtfData = rtfData
+        if let rtf = rtfData, rtf.count > ClipBlobManager.blobThresholdBytes {
+            let blobRef = ClipBlobManager.shared.storeBlob(data: rtf)
+            storedRtfData = blobRef.data(using: .utf8)
+        }
+
         return try dbWriter.write { db in
             let sql = """
             INSERT INTO clip_items (
@@ -124,7 +131,7 @@ public final class DatabaseManager: @unchecked Sendable {
             guard let item = try ClipItem.fetchOne(
                 db,
                 sql: sql,
-                arguments: [trimmed, hash, charCount, lineCount, sourceAppBundleId, sourceAppName, formatType, rtfData, htmlContent, fileURL, now, now]
+                arguments: [trimmed, hash, charCount, lineCount, sourceAppBundleId, sourceAppName, formatType, storedRtfData, htmlContent, fileURL, now, now]
             ) else {
                 throw DatabaseError(message: "Failed to fetch saved clip item")
             }

@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "NetCore", targets: ["NetCore"]),
         .library(name: "PowerCore", targets: ["PowerCore"]),
         .executable(name: "NotchKit", targets: ["NotchKit"]),
+        .executable(name: "nkit", targets: ["nkit"]),
         .executable(name: "clip", targets: ["clip"])
     ],
     dependencies: [
@@ -45,6 +46,26 @@ let package = Package(
                 "PowerCore"
             ],
             path: "Sources/NotchKit"
+        ),
+        .executableTarget(
+            name: "nkit",
+            dependencies: [
+                "ClipCore",
+                "PowerCore",
+                "NetCore",
+                .product(name: "ArgumentParser", package: "swift-argument-parser")
+            ],
+            path: "Sources/nkit"
+        ),
+        .executableTarget(
+            name: "com.notchkit.powerd",
+            dependencies: [
+                "PowerCore"
+            ],
+            path: "Sources/PowerDaemon",
+            resources: [
+                .copy("com.notchkit.powerd.plist")
+            ]
         ),
         .executableTarget(
             name: "clip",

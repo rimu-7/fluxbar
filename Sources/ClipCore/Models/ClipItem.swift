@@ -97,6 +97,15 @@ public struct ClipItem: Codable, FetchableRecord, PersistableRecord, TableRecord
         formatType == "doc" || formatType == "rtf" || rtfData != nil
     }
 
+    /// Resolves RTF binary data, automatically loading from externalized blob sandbox if offloaded
+    public var resolvedRtfData: Data? {
+        guard let data = rtfData else { return nil }
+        if let refStr = String(data: data, encoding: .utf8), refStr.hasPrefix("blob://") {
+            return ClipBlobManager.shared.retrieveBlob(reference: refStr)
+        }
+        return data
+    }
+
     public var isFile: Bool {
         formatType == "file" || fileURL != nil
     }

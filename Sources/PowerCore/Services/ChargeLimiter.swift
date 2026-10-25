@@ -1,9 +1,11 @@
 import Foundation
 import Combine
+import AppKit
 
 public extension Notification.Name {
     static let batteryChargeLimiterStateDidChange = Notification.Name("com.notchkit.powercore.stateDidChange")
     static let batteryChargeLimitReached = Notification.Name("com.notchkit.powercore.limitReached")
+    static let batteryThermalCutoutTriggered = Notification.Name("com.notchkit.powercore.thermalCutoutTriggered")
 }
 
 /// Dynamic charge limiter engine controlling battery charging thresholds and adapter bypass
@@ -25,7 +27,7 @@ public final class ChargeLimiter: @unchecked Sendable {
         monitor: BatteryMonitor = .shared,
         isLimiterEnabled: Bool = true,
         chargeLimit: Int = 80,
-        hysteresis: Int = 2
+        hysteresis: Int = 3
     ) {
         self.smcService = smcService
         self.monitor = monitor
@@ -35,11 +37,12 @@ public final class ChargeLimiter: @unchecked Sendable {
         self.isAdapterBypassActive = false
 
         setupTelemetryObservation()
+        setupSleepWakeObservation()
     }
 
     // MARK: - Configuration Updates
 
-    public func configure(isEnabled: Bool, limit: Int, hysteresis: Int = 2) {
+    public func configure(isEnabled: Bool, limit: Int, hysteresis: Int = 3) {
         lock.lock()
         defer { lock.unlock() }
 
@@ -69,6 +72,19 @@ public final class ChargeLimiter: @unchecked Sendable {
             .store(in: &cancellables)
     }
 
+    private func setupSleepWakeObservation() {
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                self.lock.lock()
+                defer { self.lock.unlock() }
+                // Re-assert SMC charge limit upon waking to prevent macOS PMU override
+                self.evaluateCurrentStateUnlocked(telemetry: self.monitor.currentTelemetry)
+            }
+            .store(in: &cancellables)
+    }
+
     public func evaluateCurrentState(telemetry: BatteryTelemetry) {
         lock.lock()
         defer { lock.unlock() }
@@ -91,6 +107,17 @@ public final class ChargeLimiter: @unchecked Sendable {
             if isAdapterBypassActive {
                 isAdapterBypassActive = false
                 NotificationCenter.default.post(name: .batteryChargeLimiterStateDidChange, object: nil)
+            }
+            return
+        }
+
+        // Thermal Cutout Guard: Pause charging immediately if cell temperature exceeds 40.0°C
+        if telemetry.temperature > 40.0 {
+            if !isAdapterBypassActive {
+                isAdapterBypassActive = true
+                smcService.setChargingInhibited(true, limitPercentage: chargeLimit)
+                NotificationCenter.default.post(name: .batteryChargeLimiterStateDidChange, object: nil)
+                NotificationCenter.default.post(name: .batteryThermalCutoutTriggered, object: nil, userInfo: ["temperature": telemetry.temperature])
             }
             return
         }

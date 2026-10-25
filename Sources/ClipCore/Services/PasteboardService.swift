@@ -80,13 +80,12 @@ public final class PasteboardService: ObservableObject {
             return
         }
 
-        // Privacy & Security Filter
-        if settings.ignoreConcealed {
-            if let types = pasteboard.types {
-                for concealed in Self.concealedPasteboardTypes {
-                    if types.contains(concealed) {
-                        return
-                    }
+        // Zero Secret Leakage: Privacy & Security Filter
+        // Automatically drop any NSPasteboard change containing concealed, transient, or auto-generated types
+        if let types = pasteboard.types {
+            for concealed in Self.concealedPasteboardTypes {
+                if types.contains(concealed) {
+                    return
                 }
             }
         }
@@ -166,7 +165,7 @@ public final class PasteboardService: ObservableObject {
         pasteboard.setString(item.content, forType: .string)
 
         // 3. Set RTF data if present (for Pages, Word, Notes, Google Docs, Slack, etc.)
-        if let rtf = item.rtfData {
+        if let rtf = item.resolvedRtfData {
             pasteboard.setData(rtf, forType: .rtf)
         }
 
