@@ -99,24 +99,6 @@ public struct PopoverRootView: View {
                     }
                     .buttonStyle(.plain)
                     .help(viewModel.settings.isPaused ? "Recording paused. Click to resume." : "Recording active. Click to pause.")
-
-                    // Frosted Settings Button
-                    Button(action: { viewModel.showingSettings = true }) {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .frame(width: 30, height: 30)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.white.opacity(0.05))
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
-                                    }
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open Settings")
                 }
 
                 // Glass Segmented Capsule Switcher & Item Counter

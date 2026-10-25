@@ -83,23 +83,6 @@ public struct SpeedMeterPopoverView: View {
             .background(Color.white.opacity(0.06))
             .clipShape(Capsule())
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
-
-            // Settings Button
-            Button(action: {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    speedVM.showingSettings = true
-                }
-            }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .frame(width: 26, height: 26)
-                    .background(Color.white.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 6.5, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
-            }
-            .buttonStyle(.plain)
-            .help("Open NotchKit Settings")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -378,7 +361,7 @@ public struct SpeedMeterPopoverView: View {
             // Open Full Settings
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.15)) {
-                    speedVM.showingSettings = true
+                    clipVM.showingSettings = true
                 }
             }) {
                 HStack(spacing: 8) {
