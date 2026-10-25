@@ -60,6 +60,11 @@ public struct ClipItem: Codable, FetchableRecord, PersistableRecord, TableRecord
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Guaranteed non-null unique identifier for SwiftUI diffing and scrolling
+    public var stableId: Int64 {
+        id ?? Int64(bitPattern: UInt64(contentHash.hashValue))
+    }
+
     public static func computeLineCount(for content: String) -> Int {
         if content.isEmpty { return 0 }
         var count = 1

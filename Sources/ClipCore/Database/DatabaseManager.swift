@@ -94,9 +94,9 @@ public final class DatabaseManager: @unchecked Sendable {
             throw DatabaseError(message: "Cannot save empty clip")
         }
 
-        let hash = ClipItem.computeHash(for: content)
-        let charCount = content.count
-        let lineCount = ClipItem.computeLineCount(for: content)
+        let hash = ClipItem.computeHash(for: trimmed)
+        let charCount = trimmed.count
+        let lineCount = ClipItem.computeLineCount(for: trimmed)
         let now = Date()
 
         return try dbWriter.write { db in
@@ -108,6 +108,9 @@ public final class DatabaseManager: @unchecked Sendable {
                 createdAt, updatedAt
             ) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(contentHash) DO UPDATE SET
+                content = excluded.content,
+                charCount = excluded.charCount,
+                lineCount = excluded.lineCount,
                 updatedAt = excluded.updatedAt,
                 copyCount = clip_items.copyCount + 1,
                 sourceAppBundleId = coalesce(excluded.sourceAppBundleId, clip_items.sourceAppBundleId),
@@ -121,7 +124,7 @@ public final class DatabaseManager: @unchecked Sendable {
             guard let item = try ClipItem.fetchOne(
                 db,
                 sql: sql,
-                arguments: [content, hash, charCount, lineCount, sourceAppBundleId, sourceAppName, formatType, rtfData, htmlContent, fileURL, now, now]
+                arguments: [trimmed, hash, charCount, lineCount, sourceAppBundleId, sourceAppName, formatType, rtfData, htmlContent, fileURL, now, now]
             ) else {
                 throw DatabaseError(message: "Failed to fetch saved clip item")
             }

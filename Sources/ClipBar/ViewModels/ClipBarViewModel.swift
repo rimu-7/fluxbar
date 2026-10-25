@@ -27,6 +27,7 @@ public final class ClipBarViewModel: ObservableObject {
     private var clipsCancellable: AnyDatabaseCancellable?
     private var settingsCancellable: AnyDatabaseCancellable?
     private var searchDebounce: AnyCancellable?
+    private var clipRecordedSub: AnyCancellable?
 
     public init(
         databaseManager: DatabaseManager = .shared,
@@ -40,10 +41,16 @@ public final class ClipBarViewModel: ObservableObject {
         refreshClips()
         refreshStats()
 
-        // Real-time notification hook when new clips are copied
+        // Real-time notification hooks when new clips are copied
         service.onClipRecorded = { [weak self] _ in
             self?.refreshClips()
         }
+
+        clipRecordedSub = NotificationCenter.default.publisher(for: .clipSuiteDidRecordClip)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshClips()
+            }
     }
 
     public func setupObservations() {

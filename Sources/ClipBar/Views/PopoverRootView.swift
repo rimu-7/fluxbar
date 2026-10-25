@@ -6,6 +6,7 @@ public struct PopoverRootView: View {
     @ObservedObject public var viewModel: ClipBarViewModel
     @FocusState private var isSearchFocused: Bool
     @State private var keyMonitor: Any?
+    private let refreshTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     public init(viewModel: ClipBarViewModel) {
         self.viewModel = viewModel
@@ -26,6 +27,9 @@ public struct PopoverRootView: View {
             viewModel.refreshClips()
             isSearchFocused = true
             setupKeyboardMonitor()
+        }
+        .onReceive(refreshTimer) { _ in
+            PasteboardService.shared.checkForChanges()
         }
         .onDisappear {
             removeKeyboardMonitor()
@@ -132,8 +136,8 @@ public struct PopoverRootView: View {
     private var clipsListView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 3) {
-                    ForEach(Array(viewModel.clips.enumerated()), id: \.element.id) { index, item in
+                VStack(spacing: 3) {
+                    ForEach(Array(viewModel.clips.enumerated()), id: \.element.stableId) { index, item in
                         ClipRowView(
                             item: item,
                             isSelected: viewModel.selectedIndex == index,
@@ -153,7 +157,7 @@ public struct PopoverRootView: View {
                                 viewModel.deleteClip(item)
                             }
                         )
-                        .id(index)
+                        .id(item.stableId)
                     }
                 }
                 .padding(.horizontal, 6)
@@ -161,8 +165,11 @@ public struct PopoverRootView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onChange(of: viewModel.selectedIndex) { newIndex in
-                withAnimation(.easeInOut(duration: 0.1)) {
-                    proxy.scrollTo(newIndex, anchor: .center)
+                if newIndex >= 0 && newIndex < viewModel.clips.count {
+                    let targetId = viewModel.clips[newIndex].stableId
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        proxy.scrollTo(targetId, anchor: .center)
+                    }
                 }
             }
         }

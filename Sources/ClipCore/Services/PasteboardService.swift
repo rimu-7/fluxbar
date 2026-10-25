@@ -1,6 +1,10 @@
 import AppKit
 import Foundation
 
+extension Notification.Name {
+    public static let clipSuiteDidRecordClip = Notification.Name("ClipSuiteDidRecordClipNotification")
+}
+
 @MainActor
 public final class PasteboardService: ObservableObject {
     public static let shared = PasteboardService()
@@ -124,6 +128,7 @@ public final class PasteboardService: ObservableObject {
                 fileURL: fileURLString
             )
             onClipRecorded?(saved)
+            NotificationCenter.default.post(name: .clipSuiteDidRecordClip, object: saved)
         } catch {
             // Silently handle error or log
         }

@@ -55,6 +55,12 @@ final class DatabasePerformanceTests: XCTestCase {
         // 4. Exact total row count in database must remain 1 (Zero duplicate rows)
         let allClips = try dbManager.queryClips(searchQuery: "", limit: 100)
         XCTAssertEqual(allClips.count, 1, "There must only be 1 row in clip_items after duplicate copies")
+
+        // 5. Copy same text with leading/trailing whitespace & newlines (e.g. browser selection)
+        let thirdItem = try dbManager.recordClip(content: "\n\n\(content)  \n")
+        XCTAssertEqual(thirdItem.id, firstItem.id, "Upsert should deduplicate whitespace/newline variations")
+        XCTAssertEqual(thirdItem.copyCount, 3)
+        XCTAssertEqual(try dbManager.queryClips(searchQuery: "", limit: 100).count, 1)
     }
 
     // MARK: - Test 2: Native SQLite Prune Trigger
