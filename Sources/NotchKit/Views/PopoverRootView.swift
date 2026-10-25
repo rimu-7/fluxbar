@@ -178,7 +178,7 @@ public struct PopoverRootView: View {
     private var clipsListView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 3) {
+                LazyVStack(spacing: 3) {
                     ForEach(Array(viewModel.clips.enumerated()), id: \.element.stableId) { index, item in
                         ClipRowView(
                             item: item,
@@ -200,6 +200,11 @@ public struct PopoverRootView: View {
                             }
                         )
                         .id(item.stableId)
+                        .onAppear {
+                            if index >= viewModel.clips.count - 4 {
+                                viewModel.fetchNextPageIfNeeded()
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 8)

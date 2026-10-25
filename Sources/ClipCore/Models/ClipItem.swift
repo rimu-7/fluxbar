@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 import GRDB
 
-public struct ClipItem: Codable, FetchableRecord, PersistableRecord, TableRecord, Identifiable, Sendable, Equatable, Hashable {
+public struct ClipItem: Codable, FetchableRecord, PersistableRecord, TableRecord, ClipPresentable, Equatable, Hashable {
     public static let databaseTableName = "clip_items"
 
     public var id: Int64?
@@ -18,6 +18,7 @@ public struct ClipItem: Codable, FetchableRecord, PersistableRecord, TableRecord
     public var rtfData: Data?
     public var htmlContent: String?
     public var fileURL: String?
+    public var thumbnailFilename: String?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -35,6 +36,7 @@ public struct ClipItem: Codable, FetchableRecord, PersistableRecord, TableRecord
         rtfData: Data? = nil,
         htmlContent: String? = nil,
         fileURL: String? = nil,
+        thumbnailFilename: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -51,6 +53,7 @@ public struct ClipItem: Codable, FetchableRecord, PersistableRecord, TableRecord
         self.rtfData = rtfData
         self.htmlContent = htmlContent
         self.fileURL = fileURL
+        self.thumbnailFilename = thumbnailFilename
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -138,6 +141,7 @@ public struct ClipItem: Codable, FetchableRecord, PersistableRecord, TableRecord
         public static let rtfData = Column(CodingKeys.rtfData)
         public static let htmlContent = Column(CodingKeys.htmlContent)
         public static let fileURL = Column(CodingKeys.fileURL)
+        public static let thumbnailFilename = Column(CodingKeys.thumbnailFilename)
         public static let createdAt = Column(CodingKeys.createdAt)
         public static let updatedAt = Column(CodingKeys.updatedAt)
     }

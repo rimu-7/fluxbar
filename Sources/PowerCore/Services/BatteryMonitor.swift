@@ -12,19 +12,20 @@ public final class BatteryMonitor: @unchecked Sendable {
         telemetryPublisher.value
     }
 
-    private var pollTimer: Timer?
+    public private(set) var isPopoverVisible: Bool = false
     private var powerSourceRunLoopSource: CFRunLoopSource?
     private let queue = DispatchQueue(label: "com.notchkit.powercore.battery-monitor", qos: .utility)
     private var isMonitoring = false
     private let lock = NSLock()
 
     public init() {
-        let initial = Self.fetchTelemetry()
+        let initial = Self.fetchTelemetry(deep: true)
         self.telemetryPublisher = CurrentValueSubject<BatteryTelemetry, Never>(initial)
     }
 
     // MARK: - Monitoring Control
 
+    /// Starts event-driven monitoring using native IOKit power source notifications (Zero periodic polling timers)
     public func startMonitoring(interval: TimeInterval = 2.0) {
         lock.lock()
         defer { lock.unlock() }
@@ -33,18 +34,9 @@ public final class BatteryMonitor: @unchecked Sendable {
         isMonitoring = true
 
         // 1. Initial snapshot
-        refresh()
+        refresh(deep: false)
 
-        // 2. Periodic background poll
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.pollTimer?.invalidate()
-            self.pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-                self?.refresh()
-            }
-        }
-
-        // 3. Register native IOKit power source run loop event notification
+        // 2. Register native IOKit power source run loop event notification (0% idle CPU)
         registerPowerSourceNotification()
     }
 
@@ -55,21 +47,28 @@ public final class BatteryMonitor: @unchecked Sendable {
         guard isMonitoring else { return }
         isMonitoring = false
 
-        DispatchQueue.main.async { [weak self] in
-            self?.pollTimer?.invalidate()
-            self?.pollTimer = nil
-        }
-
         if let source = powerSourceRunLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
             powerSourceRunLoopSource = nil
         }
     }
 
-    public func refresh() {
+    /// Sets whether the popover UI is open, pausing deep AppleSmartBattery/FedDetails polling when closed
+    public func setPopoverVisible(_ visible: Bool) {
+        lock.lock()
+        self.isPopoverVisible = visible
+        lock.unlock()
+
+        if visible {
+            refresh(deep: true)
+        }
+    }
+
+    public func refresh(deep: Bool? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
-            let snapshot = Self.fetchTelemetry()
+            let shouldDeep = deep ?? self.isPopoverVisible
+            let snapshot = Self.fetchTelemetry(deep: shouldDeep)
             DispatchQueue.main.async {
                 self.telemetryPublisher.send(snapshot)
             }
@@ -78,7 +77,7 @@ public final class BatteryMonitor: @unchecked Sendable {
 
     // MARK: - Hardware Telemetry Reading
 
-    public static func fetchTelemetry() -> BatteryTelemetry {
+    public static func fetchTelemetry(deep: Bool = true) -> BatteryTelemetry {
         var percentage = 100
         var maxCapacity = 100
         var isCharging = false

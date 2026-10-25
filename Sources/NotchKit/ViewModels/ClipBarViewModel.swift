@@ -15,7 +15,8 @@ public enum FilterMode: String, CaseIterable, Identifiable, Sendable {
 public final class ClipBarViewModel: ObservableObject {
     public static let shared = ClipBarViewModel()
 
-    @Published public var clips: [ClipItem] = []
+    // Ultra-lightweight metadata-only projection for SwiftUI (~200 bytes per row instead of 50KB+)
+    @Published public var clips: [ClipListSummary] = []
     @Published public var searchQuery: String = ""
     @Published public var filterMode: FilterMode = .all
     @Published public var selectedIndex: Int = 0
@@ -24,14 +25,17 @@ public final class ClipBarViewModel: ObservableObject {
     @Published public var copiedClipId: Int64?
     @Published public var showingSettings: Bool = false
 
+    public private(set) var hasMorePages: Bool = true
+    public private(set) var isPopoverVisible: Bool = false
+
     public var dbPath: String? { dbManager.dbPath }
 
     private let dbManager: DatabaseManager
     private let pasteboardService: PasteboardService
-    private var clipsCancellable: AnyDatabaseCancellable?
     private var settingsCancellable: AnyDatabaseCancellable?
     private var searchDebounce: AnyCancellable?
     private var clipRecordedSub: AnyCancellable?
+    private var isLoadingNextPage: Bool = false
 
     public init(
         databaseManager: DatabaseManager = .shared,
@@ -45,16 +49,28 @@ public final class ClipBarViewModel: ObservableObject {
         refreshClips()
         refreshStats()
 
-        // Real-time notification hooks when new clips are copied
+        // Real-time notification hooks: only refresh UI if popover is actively visible
         service.onClipRecorded = { [weak self] _ in
-            self?.refreshClips()
+            guard let self = self, self.isPopoverVisible else { return }
+            self.refreshClips()
         }
 
         clipRecordedSub = NotificationCenter.default.publisher(for: .clipSuiteDidRecordClip)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refreshClips()
+                guard let self = self, self.isPopoverVisible else { return }
+                self.refreshClips()
             }
+    }
+
+    public func setPopoverVisible(_ visible: Bool) {
+        self.isPopoverVisible = visible
+        if visible {
+            refreshClips()
+            refreshStats()
+        } else {
+            releaseCachedSearchResults()
+        }
     }
 
     public func setupObservations() {
@@ -71,60 +87,73 @@ public final class ClipBarViewModel: ObservableObject {
             }
         )
 
-        // Observe clips reactively based on search query and filter mode
-        restartClipsObservation()
-
-        // Debounce search input and restart observation
+        // Debounce search input and refresh first page
         searchDebounce = Publishers.CombineLatest($searchQuery, $filterMode)
             .dropFirst()
             .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.selectedIndex = 0
-                self?.restartClipsObservation()
+                self?.refreshClips()
             }
     }
+
+    // MARK: - Keyset Pagination (Page 1)
 
     public func refreshClips() {
         let currentQuery = searchQuery
         let pinnedOnly = (filterMode == .pinned)
-        if let updated = try? dbManager.queryClips(searchQuery: currentQuery, limit: 150, pinnedOnly: pinnedOnly) {
-            self.clips = updated
-            if self.selectedIndex >= updated.count {
-                self.selectedIndex = max(0, updated.count - 1)
+        do {
+            let items = try dbManager.fetchNextPage(
+                beforeId: nil,
+                searchQuery: currentQuery,
+                pinnedOnly: pinnedOnly,
+                limit: 25
+            )
+            self.clips = items
+            self.hasMorePages = (items.count >= 25)
+            if self.selectedIndex >= items.count {
+                self.selectedIndex = max(0, items.count - 1)
             }
             self.refreshStats()
+        } catch {
+            print("Failed to fetch first page of clips: \(error)")
         }
     }
 
-    private func restartClipsObservation() {
-        clipsCancellable?.cancel()
+    // MARK: - Keyset Pagination (Subsequent Pages)
 
+    public func fetchNextPageIfNeeded() {
+        guard isPopoverVisible, !isLoadingNextPage, hasMorePages,
+              let lastItem = clips.last, let lastId = lastItem.id else { return }
+
+        isLoadingNextPage = true
         let currentQuery = searchQuery
         let pinnedOnly = (filterMode == .pinned)
 
-        // Synchronously load first
-        refreshClips()
-
-        clipsCancellable = dbManager.makeClipsObservation(
-            searchQuery: { currentQuery },
-            pinnedOnly: { pinnedOnly },
-            limit: 150
-        ).start(
-            in: dbManager.dbWriter,
-            onError: { error in
-                print("Clips observation error: \(error)")
-            },
-            onChange: { [weak self] newClips in
-                Task { @MainActor [weak self] in
-                    guard let self = self else { return }
-                    self.clips = newClips
-                    if self.selectedIndex >= newClips.count {
-                        self.selectedIndex = max(0, newClips.count - 1)
-                    }
-                    self.refreshStats()
-                }
+        do {
+            let nextPage = try dbManager.fetchNextPage(
+                beforeId: lastId,
+                searchQuery: currentQuery,
+                pinnedOnly: pinnedOnly,
+                limit: 25
+            )
+            if nextPage.isEmpty {
+                self.hasMorePages = false
+            } else {
+                self.clips.append(contentsOf: nextPage)
+                self.hasMorePages = (nextPage.count >= 25)
             }
-        )
+        } catch {
+            print("Failed to fetch next page of clips: \(error)")
+        }
+        isLoadingNextPage = false
+    }
+
+    /// Releases cached search results when popover closes to keep memory <15 MB
+    public func releaseCachedSearchResults() {
+        if clips.count > 25 {
+            clips = Array(clips.prefix(25))
+        }
     }
 
     public func refreshStats() {
@@ -133,7 +162,25 @@ public final class ClipBarViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Actions
+    // MARK: - Actions (Lazy Full Fetch)
+
+    /// Lazy fetch: only query the full content or blob column for a single ID at the exact millisecond user clicks Copy
+    public func copyClip(_ item: ClipListSummary) {
+        guard let id = item.id else { return }
+        do {
+            if let fullClip = try dbManager.fetchClip(id: id) {
+                pasteboardService.copyToPasteboard(item: fullClip)
+                copiedClipId = id
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                    if self?.copiedClipId == id {
+                        self?.copiedClipId = nil
+                    }
+                }
+            }
+        } catch {
+            print("Failed to fetch full clip #\(id) for pasteboard copy: \(error)")
+        }
+    }
 
     public func copyClip(_ item: ClipItem) {
         pasteboardService.copyToPasteboard(item: item)
@@ -155,6 +202,16 @@ public final class ClipBarViewModel: ObservableObject {
         copyClip(clips[index])
     }
 
+    public func togglePin(_ item: ClipListSummary) {
+        guard let id = item.id else { return }
+        do {
+            try dbManager.togglePin(id: id)
+            refreshClips()
+        } catch {
+            print("Failed to toggle pin for clip #\(id): \(error)")
+        }
+    }
+
     public func togglePin(_ item: ClipItem) {
         guard let id = item.id else { return }
         do {
@@ -168,6 +225,16 @@ public final class ClipBarViewModel: ObservableObject {
     public func togglePinSelected() {
         guard !clips.isEmpty, selectedIndex >= 0, selectedIndex < clips.count else { return }
         togglePin(clips[selectedIndex])
+    }
+
+    public func deleteClip(_ item: ClipListSummary) {
+        guard let id = item.id else { return }
+        do {
+            try dbManager.deleteClip(id: id)
+            refreshClips()
+        } catch {
+            print("Failed to delete clip #\(id): \(error)")
+        }
     }
 
     public func deleteClip(_ item: ClipItem) {

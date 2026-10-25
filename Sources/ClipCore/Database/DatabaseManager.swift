@@ -56,6 +56,9 @@ public final class DatabaseManager: @unchecked Sendable {
             try db.execute(sql: "PRAGMA recursive_triggers = ON;")
             try db.execute(sql: "PRAGMA wal_autocheckpoint = 25;")
             try db.execute(sql: "PRAGMA journal_size_limit = 65536;")
+            try db.execute(sql: "PRAGMA cache_size = -1024;")   // Cap SQLite cache at strictly 1 MB
+            try db.execute(sql: "PRAGMA temp_store = MEMORY;")
+            try db.execute(sql: "PRAGMA mmap_size = 16777216;") // 16 MB memory-mapped read window
         }
 
         let pool = try DatabasePool(path: url.path, configuration: config)
@@ -71,6 +74,8 @@ public final class DatabaseManager: @unchecked Sendable {
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON;")
             try db.execute(sql: "PRAGMA recursive_triggers = ON;")
+            try db.execute(sql: "PRAGMA cache_size = -1024;")
+            try db.execute(sql: "PRAGMA temp_store = MEMORY;")
         }
         let queue = try DatabaseQueue(configuration: config)
         self.dbWriter = queue
@@ -87,7 +92,8 @@ public final class DatabaseManager: @unchecked Sendable {
         formatType: String = "text",
         rtfData: Data? = nil,
         htmlContent: String? = nil,
-        fileURL: String? = nil
+        fileURL: String? = nil,
+        thumbnailFilename: String? = nil
     ) throws -> ClipItem {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -97,6 +103,7 @@ public final class DatabaseManager: @unchecked Sendable {
         let hash = ClipItem.computeHash(for: trimmed)
         let charCount = trimmed.count
         let lineCount = ClipItem.computeLineCount(for: trimmed)
+        let preview = String(trimmed.prefix(150))
         let now = Date()
 
         // Externalize large payloads exceeding 100 KB to keep SQLite under 5 MB
@@ -112,8 +119,9 @@ public final class DatabaseManager: @unchecked Sendable {
                 content, contentHash, charCount, lineCount,
                 sourceAppBundleId, sourceAppName, copyCount, isPinned,
                 formatType, rtfData, htmlContent, fileURL,
+                previewText, thumbnailFilename,
                 createdAt, updatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(contentHash) DO UPDATE SET
                 content = excluded.content,
                 charCount = excluded.charCount,
@@ -125,13 +133,15 @@ public final class DatabaseManager: @unchecked Sendable {
                 formatType = coalesce(excluded.formatType, clip_items.formatType),
                 rtfData = coalesce(excluded.rtfData, clip_items.rtfData),
                 htmlContent = coalesce(excluded.htmlContent, clip_items.htmlContent),
-                fileURL = coalesce(excluded.fileURL, clip_items.fileURL)
+                fileURL = coalesce(excluded.fileURL, clip_items.fileURL),
+                previewText = coalesce(excluded.previewText, clip_items.previewText),
+                thumbnailFilename = coalesce(excluded.thumbnailFilename, clip_items.thumbnailFilename)
             RETURNING *;
             """
             guard let item = try ClipItem.fetchOne(
                 db,
                 sql: sql,
-                arguments: [trimmed, hash, charCount, lineCount, sourceAppBundleId, sourceAppName, formatType, storedRtfData, htmlContent, fileURL, now, now]
+                arguments: [trimmed, hash, charCount, lineCount, sourceAppBundleId, sourceAppName, formatType, storedRtfData, htmlContent, fileURL, preview, thumbnailFilename, now, now]
             ) else {
                 throw DatabaseError(message: "Failed to fetch saved clip item")
             }
@@ -193,6 +203,65 @@ public final class DatabaseManager: @unchecked Sendable {
     public func fetchClip(hash: String) throws -> ClipItem? {
         try dbWriter.read { db in
             try ClipItem.fetchOne(db, sql: "SELECT * FROM clip_items WHERE contentHash = ?;", arguments: [hash])
+        }
+    }
+
+    // MARK: - Keyset Pagination (Ultra-low memory list projection)
+
+    /// Fetches lightweight `ClipListSummary` items (only ~200 bytes each) using SQLite keyset pagination
+    public func fetchNextPage(
+        beforeId: Int64? = nil,
+        searchQuery: String = "",
+        pinnedOnly: Bool = false,
+        limit: Int = 25
+    ) throws -> [ClipListSummary] {
+        try dbWriter.read { db in
+            let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                var sql = """
+                SELECT id, coalesce(previewText, substr(content, 1, 150)) as previewText,
+                       formatType, sourceAppBundleId, sourceAppName,
+                       isPinned, copyCount, charCount, lineCount,
+                       createdAt, updatedAt, thumbnailFilename, fileURL
+                FROM clip_items
+                WHERE (? = 0 OR isPinned = 1)
+                """
+                var arguments: [DatabaseValueConvertible] = [pinnedOnly ? 1 : 0]
+                if let beforeId = beforeId {
+                    sql += " AND id < ?"
+                    arguments.append(beforeId)
+                }
+                sql += " ORDER BY isPinned DESC, id DESC LIMIT ?;"
+                arguments.append(limit)
+                return try ClipListSummary.fetchAll(db, sql: sql, arguments: StatementArguments(arguments))
+            } else {
+                let sanitized = Self.sanitizeFTS5Query(trimmed)
+                var sql = """
+                SELECT c.id, coalesce(c.previewText, substr(c.content, 1, 150)) as previewText,
+                       c.formatType, c.sourceAppBundleId, c.sourceAppName,
+                       c.isPinned, c.copyCount, c.charCount, c.lineCount,
+                       c.createdAt, c.updatedAt, c.thumbnailFilename, c.fileURL
+                FROM clip_items c
+                JOIN clip_items_fts f ON c.id = f.rowid
+                WHERE clip_items_fts MATCH ?
+                  AND (? = 0 OR c.isPinned = 1)
+                """
+                var arguments: [DatabaseValueConvertible] = [sanitized, pinnedOnly ? 1 : 0]
+                if let beforeId = beforeId {
+                    sql += " AND c.id < ?"
+                    arguments.append(beforeId)
+                }
+                sql += " ORDER BY c.isPinned DESC, c.id DESC LIMIT ?;"
+                arguments.append(limit)
+                return try ClipListSummary.fetchAll(db, sql: sql, arguments: StatementArguments(arguments))
+            }
+        }
+    }
+
+    /// Reclaims transient SQLite memory when popover closes via PRAGMA shrink_memory
+    public func shrinkMemory() {
+        try? dbWriter.write { db in
+            try? db.execute(sql: "PRAGMA shrink_memory;")
         }
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import GRDB
 
 /// Thread-safe SQLite store for persisting monthly and daily network bandwidth usage statistics.
@@ -16,6 +17,12 @@ public final class BandwidthStore: @unchecked Sendable {
     private var cachedTodayUsage: BandwidthUsage
     private var cachedSessionUsage: BandwidthUsage
 
+    // Low-energy batch write buffer (flushes every 5 minutes or on sleep/quit)
+    private var pendingBytesIn: UInt64 = 0
+    private var pendingBytesOut: UInt64 = 0
+    private var lastFlushDate: Date = Date()
+    private var lifecycleObservers: [NSObjectProtocol] = []
+
     public init(databasePath: String? = nil) {
         let path: String
         if let customPath = databasePath {
@@ -28,11 +35,12 @@ public final class BandwidthStore: @unchecked Sendable {
         }
 
         var config = Configuration()
-        config.qos = .userInitiated
+        config.qos = .utility
         config.label = "NotchKit.BandwidthStore"
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA journal_mode = WAL;")
             try db.execute(sql: "PRAGMA synchronous = NORMAL;")
+            try db.execute(sql: "PRAGMA cache_size = -1024;")
         }
 
         // Initialize SQLite queue with WAL mode
@@ -74,6 +82,31 @@ public final class BandwidthStore: @unchecked Sendable {
 
         // Load initial values from DB
         reloadInitialStats(now: now)
+        setupLifecycleObservers()
+    }
+
+    deinit {
+        flushToDisk()
+    }
+
+    private func setupLifecycleObservers() {
+        let termObs = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.flushToDisk()
+        }
+
+        let sleepObs = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.flushToDisk()
+        }
+
+        lifecycleObservers = [termObs, sleepObs]
     }
 
     private func reloadInitialStats(now: Date) {
@@ -110,6 +143,7 @@ public final class BandwidthStore: @unchecked Sendable {
     }
 
     /// Records transferred bytes into monthly, daily, and session totals.
+    /// Accumulates in RAM and flushes to SQLite every 5 minutes to prevent waking disk I/O.
     public func recordTransfer(bytesIn: UInt64, bytesOut: UInt64, date: Date = Date()) {
         guard bytesIn > 0 || bytesOut > 0 else { return }
 
@@ -137,11 +171,37 @@ public final class BandwidthStore: @unchecked Sendable {
         cachedTodayUsage.bytesIn += bytesIn
         cachedTodayUsage.bytesOut += bytesOut
         cachedTodayUsage.updatedAt = date
+
+        // Accumulate pending batch for disk write
+        pendingBytesIn += bytesIn
+        pendingBytesOut += bytesOut
+        let shouldFlush = date.timeIntervalSince(lastFlushDate) >= 300 // 5 minutes
         lock.unlock()
 
-        // Upsert into SQLite database
-        let inInt = Int64(min(bytesIn, UInt64(Int64.max)))
-        let outInt = Int64(min(bytesOut, UInt64(Int64.max)))
+        if shouldFlush {
+            flushToDisk()
+        }
+    }
+
+    /// Flushes accumulated byte counters into SQLite database in a single batch
+    public func flushToDisk() {
+        lock.lock()
+        guard pendingBytesIn > 0 || pendingBytesOut > 0 else {
+            lock.unlock()
+            return
+        }
+        let toFlushIn = pendingBytesIn
+        let toFlushOut = pendingBytesOut
+        pendingBytesIn = 0
+        pendingBytesOut = 0
+        let date = Date()
+        lastFlushDate = date
+        let monthKey = monthFormatter.string(from: date)
+        let dayKey = dateFormatter.string(from: date)
+        lock.unlock()
+
+        let inInt = Int64(min(toFlushIn, UInt64(Int64.max)))
+        let outInt = Int64(min(toFlushOut, UInt64(Int64.max)))
         let ts = date.timeIntervalSince1970
 
         try? dbQueue.write { db in

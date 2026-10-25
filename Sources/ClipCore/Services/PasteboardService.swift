@@ -53,9 +53,35 @@ public final class PasteboardService: ObservableObject {
         return false
     }
 
+    private var sleepObservers: [NSObjectProtocol] = []
+
     public init(databaseManager: DatabaseManager = .shared) {
         self.dbManager = databaseManager
         self.lastChangeCount = pasteboard.changeCount
+        setupScreenSleepObservers()
+    }
+
+    private func setupScreenSleepObservers() {
+        let sleepObs = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.timer?.invalidate()
+                self?.timer = nil
+            }
+        }
+        let wakeObs = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.startMonitoring()
+            }
+        }
+        sleepObservers = [sleepObs, wakeObs]
     }
 
     public func startMonitoring(interval: TimeInterval = 0.4) {
@@ -65,25 +91,25 @@ public final class PasteboardService: ObservableObject {
         // 1. Initial cleanup at startup
         _ = try? dbManager.performCleanup()
 
-        // 2. High-frequency pasteboard polling
-        self.timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        // 2. High-frequency pasteboard polling with Timer Coalescing for E-cores
+        let newTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.checkForChanges()
             }
         }
-        if let timer = timer {
-            RunLoop.main.add(timer, forMode: .common)
-        }
+        newTimer.tolerance = 0.2 // Timer coalescing allows scheduling on Apple Silicon E-cores
+        RunLoop.main.add(newTimer, forMode: .common)
+        self.timer = newTimer
 
         // 3. Automated retention cleanup every 30 minutes (1800s)
-        self.cleanupTimer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
+        let cleanup = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 _ = try? self?.dbManager.performCleanup()
             }
         }
-        if let cleanupTimer = cleanupTimer {
-            RunLoop.main.add(cleanupTimer, forMode: .common)
-        }
+        cleanup.tolerance = 60.0
+        RunLoop.main.add(cleanup, forMode: .common)
+        self.cleanupTimer = cleanup
     }
 
     public func stopMonitoring() {
@@ -125,19 +151,36 @@ public final class PasteboardService: ObservableObject {
         // 3. Detect HTML string
         let htmlString = pasteboard.string(forType: .html)
 
-        // 4. Plain text content
+        // 4. Detect Image payloads (PNG, TIFF) and generate low-memory 80x80 thumbnail directly via ImageIO
+        var thumbnailFilename: String?
+        var imageData: Data?
+        if let tiff = pasteboard.data(forType: .tiff) {
+            imageData = tiff
+        } else if let png = pasteboard.data(forType: .png) {
+            imageData = png
+        }
+
+        if let rawImg = imageData {
+            thumbnailFilename = ThumbnailService.generateAndSaveThumbnail(from: rawImg, maxPixelSize: 80)
+        }
+
+        // 5. Plain text content
         var contentString = pasteboard.string(forType: .string)
         if (contentString == nil || contentString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true), let fUrl = fileURLString {
             contentString = URL(string: fUrl)?.lastPathComponent ?? fUrl
+        } else if (contentString == nil || contentString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true), let img = imageData {
+            contentString = "Image (\(img.count / 1024) KB)"
         }
 
         guard let string = contentString, !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
 
-        // 5. Determine format type
+        // 6. Determine format type
         let formatType: String
-        if fileURLString != nil {
+        if imageData != nil {
+            formatType = "image"
+        } else if fileURLString != nil {
             formatType = "file"
         } else if rtfData != nil {
             formatType = "doc"
@@ -157,15 +200,18 @@ public final class PasteboardService: ObservableObject {
             appName = frontApp.localizedName
         }
 
+        let payloadData = imageData ?? rtfData
+
         do {
             let saved = try dbManager.recordClip(
                 content: string,
                 sourceAppBundleId: bundleId,
                 sourceAppName: appName,
                 formatType: formatType,
-                rtfData: rtfData,
+                rtfData: payloadData,
                 htmlContent: htmlString,
-                fileURL: fileURLString
+                fileURL: fileURLString,
+                thumbnailFilename: thumbnailFilename
             )
             onClipRecorded?(saved)
             NotificationCenter.default.post(name: .clipSuiteDidRecordClip, object: saved)

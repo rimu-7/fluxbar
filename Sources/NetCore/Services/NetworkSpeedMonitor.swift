@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Network
 import Combine
 
@@ -14,11 +15,13 @@ public final class NetworkSpeedMonitor: ObservableObject, @unchecked Sendable {
 
     private let pathMonitor: NWPathMonitor
     private let monitorQueue = DispatchQueue(label: "com.notchkit.NetCore.pathMonitor", qos: .utility)
-    private let samplerQueue = DispatchQueue(label: "com.notchkit.NetCore.sampler", qos: .userInteractive)
+    // Scheduled on .utility to guarantee execution on Apple Silicon Efficiency (E) cores
+    private let samplerQueue = DispatchQueue(label: "com.notchkit.NetCore.sampler", qos: .utility)
 
     private let sampler = NetworkByteSampler()
     private let bandwidthStore: BandwidthStore
     private var timer: DispatchSourceTimer?
+    private var sleepObservers: [NSObjectProtocol] = []
 
     private var lastSampleBytes: (bytesIn: UInt64, bytesOut: UInt64)?
     private var lastSampleDate: Date?
@@ -34,11 +37,33 @@ public final class NetworkSpeedMonitor: ObservableObject, @unchecked Sendable {
         self.pathMonitor = NWPathMonitor()
 
         setupPathMonitoring()
+        setupScreenSleepObservers()
         startSamplingTimer()
     }
 
     deinit {
         stopMonitoring()
+    }
+
+    private func setupScreenSleepObservers() {
+        let sleepObs = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidSleepNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.timer?.cancel()
+            self?.timer = nil
+        }
+
+        let wakeObs = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.startSamplingTimer()
+        }
+
+        sleepObservers = [sleepObs, wakeObs]
     }
 
     private func setupPathMonitoring() {
@@ -80,7 +105,8 @@ public final class NetworkSpeedMonitor: ObservableObject, @unchecked Sendable {
         timer = nil
 
         let newTimer = DispatchSource.makeTimerSource(queue: samplerQueue)
-        newTimer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(100))
+        // 250ms leeway enables macOS timer coalescing on Apple Silicon Efficiency cores
+        newTimer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(250))
 
         newTimer.setEventHandler { [weak self] in
             self?.sampleNetworkSpeed()

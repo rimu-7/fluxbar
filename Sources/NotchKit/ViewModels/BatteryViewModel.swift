@@ -124,6 +124,14 @@ public final class BatteryViewModel: ObservableObject {
         self.isHelperInstalled = smcService.isHelperInstalled
     }
 
+    /// Controls deep AppleSmartBattery telemetry polling: stops IORegistry queries when popover is closed
+    public func setPopoverVisible(_ visible: Bool) {
+        monitor.setPopoverVisible(visible)
+        if visible {
+            refresh()
+        }
+    }
+
     public func authorizeHelper() {
         guard !isAuthorizingHelper else { return }
         isAuthorizingHelper = true

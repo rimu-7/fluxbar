@@ -95,4 +95,13 @@ public final class SpeedMeterViewModel: ObservableObject {
         }
         isSpeedMeterEnabled = current.isSpeedMeterEnabled
     }
+
+    public func setPopoverVisible(_ visible: Bool) {
+        if visible {
+            self.monthUsage = monitor.monthUsage
+            self.todayUsage = monitor.todayUsage
+            self.sessionUsage = monitor.sessionUsage
+            self.interfaceInfo = monitor.interfaceInfo
+        }
+    }
 }

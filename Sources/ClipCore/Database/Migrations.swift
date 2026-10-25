@@ -183,6 +183,23 @@ public enum Migrations {
             }
         }
 
+        migrator.registerMigration("v7_metadata_projection") { db in
+            let cols = try db.columns(in: "clip_items")
+            let names = Set(cols.map(\.name))
+            if !names.contains("previewText") {
+                try db.execute(sql: "ALTER TABLE clip_items ADD COLUMN previewText TEXT;")
+                try db.execute(sql: """
+                    UPDATE clip_items
+                    SET previewText = substr(trim(content), 1, 150)
+                    WHERE previewText IS NULL;
+                """)
+            }
+            if !names.contains("thumbnailFilename") {
+                try db.execute(sql: "ALTER TABLE clip_items ADD COLUMN thumbnailFilename TEXT;")
+            }
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_clip_items_keyset ON clip_items (isPinned DESC, id DESC);")
+        }
+
         return migrator
     }
 }

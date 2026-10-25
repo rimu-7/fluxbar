@@ -2,7 +2,7 @@ import SwiftUI
 import ClipCore
 
 public struct ClipRowView: View {
-    public let item: ClipItem
+    public let item: ClipListSummary
     public let isSelected: Bool
     public let quickIndex: Int?
     public let isCopied: Bool
@@ -14,7 +14,7 @@ public struct ClipRowView: View {
     @State private var isHovered: Bool = false
 
     public init(
-        item: ClipItem,
+        item: ClipListSummary,
         isSelected: Bool,
         quickIndex: Int?,
         isCopied: Bool,
@@ -58,6 +58,18 @@ public struct ClipRowView: View {
             .buttonStyle(.plain)
             .help(item.isPinned ? "Unpin clip (⌘P)" : "Pin clip (⌘P)")
             .padding(.top, 1)
+
+            // Ultra-low memory downsampled thumbnail loaded on-demand
+            if let thumbName = item.thumbnailFilename,
+               let nsImg = ThumbnailService.loadThumbnail(filename: thumbName) {
+                Image(nsImage: nsImg)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 30, height: 30)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5))
+                    .padding(.top, 1)
+            }
 
             // Middle Content: Preview and Metadata (Click to select & copy)
             VStack(alignment: .leading, spacing: 5) {
