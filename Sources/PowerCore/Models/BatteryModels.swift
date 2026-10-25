@@ -175,6 +175,50 @@ public struct BatteryTelemetry: Codable, Sendable, Equatable {
             return "\(percentage)%"
         }
     }
+    /// Lost capacity from original factory design
+    public var degradedCapacity: Int {
+        max(0, designCapacity - fullChargeCapacity)
+    }
+
+    /// Degradation percentage (0% = brand new, 20% = 80% health)
+    public var degradationPercentage: Double {
+        max(0.0, min(100.0, 100.0 - healthPercentage))
+    }
+
+    /// Standard Apple Silicon rated lifecycle (1000 full recharge cycles)
+    public var ratedCycles: Int { 1000 }
+
+    /// Lifecycle remaining percentage based on 1000 cycles
+    public var cycleLifeRemainingPercentage: Double {
+        max(0.0, min(100.0, (1.0 - (Double(cycleCount) / 1000.0)) * 100.0))
+    }
+
+    /// Estimated remaining years of battery life
+    public var estimatedYearsRemaining: Double {
+        let cyclesLeft = max(0, 1000 - cycleCount)
+        return max(0.5, (Double(cyclesLeft) / 180.0 * 10).rounded() / 10.0)
+    }
+
+    /// Qualitative battery health classification
+    public var healthGrade: String {
+        if healthPercentage >= 90 { return "Optimal" }
+        if healthPercentage >= 80 { return "Normal (Peak)" }
+        if healthPercentage >= 70 { return "Moderate" }
+        return "Service Soon"
+    }
+
+    /// Thermal state description
+    public var thermalStateDescription: String {
+        if temperature < 32.0 { return "Cool & Normal" }
+        if temperature < 38.0 { return "Optimal" }
+        if temperature < 44.0 { return "Warm" }
+        return "Hot"
+    }
+
+    /// Voltage formatted in Volts (e.g. 13.19 V)
+    public var voltageInVolts: Double {
+        (Double(voltage) / 100.0).rounded() / 10.0
+    }
 }
 
 /// User configurable settings for battery charge limiting
@@ -185,7 +229,7 @@ public struct PowerSettings: Codable, Sendable, Equatable {
     public var notifyOnLimitReached: Bool
     public var isAdapterBypassActive: Bool
 
-    public static let availablePresets: [Int] = [70, 75, 80, 85, 90, 100]
+    public static let availablePresets: [Int] = [50, 70, 75, 80, 85, 90, 100]
 
     public init(
         isLimiterEnabled: Bool = true,

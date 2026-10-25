@@ -21,6 +21,17 @@ public enum NotchKitTab: String, CaseIterable, Identifiable, Sendable {
             return "network"
         }
     }
+
+    public var accentColor: Color {
+        switch self {
+        case .clipboard:
+            return Color(red: 0.22, green: 0.68, blue: 1.0) // Vivid Sky Blue
+        case .battery:
+            return Color(red: 0.05, green: 0.88, blue: 0.62) // Neon Emerald
+        case .speedMeter:
+            return Color(red: 0.72, green: 0.44, blue: 1.0) // Cyber Lavender
+        }
+    }
 }
 
 @MainActor
@@ -51,7 +62,7 @@ public struct NotchKitMainPopoverView: View {
                         colors: [
                             Color.white.opacity(0.04),
                             Color.clear,
-                            Color.black.opacity(0.12)
+                            Color.black.opacity(0.14)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -65,11 +76,11 @@ public struct NotchKitMainPopoverView: View {
                 VStack(spacing: 0) {
                     // Unified Top Bar with NotchKit Brand, Segmented Switcher, and Close Button
                     topNavigationHeader
-                        .padding(.horizontal, 14)
-                        .padding(.top, 12)
-                        .padding(.bottom, 10)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 13)
+                        .padding(.bottom, 11)
 
-                    Divider().opacity(0.15)
+                    Divider().opacity(0.12)
 
                     // Tab Content Switcher
                     Group {
@@ -86,7 +97,7 @@ public struct NotchKitMainPopoverView: View {
                 }
             }
         }
-        .frame(width: 440, height: 600)
+        .frame(width: 485, height: 640)
     }
 
     // MARK: - Top Navigation Header
@@ -94,59 +105,97 @@ public struct NotchKitMainPopoverView: View {
     private var topNavigationHeader: some View {
         HStack(spacing: 10) {
             // App Branding
-            HStack(spacing: 6) {
-                Image(systemName: "circle.grid.2x2.fill")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.cyan)
+            HStack(spacing: 7) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.cyan, Color.blue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 22, height: 22)
+                        .shadow(color: Color.cyan.opacity(0.35), radius: 4, x: 0, y: 1)
+
+                    Image(systemName: "circle.grid.2x2.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white)
+                }
 
                 Text("NotchKit")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(.primary)
             }
+            .fixedSize()
 
             Spacer(minLength: 4)
 
             // Segmented Glass Tab Switcher (Order: Clipboard -> Battery -> Speed Meter)
-            HStack(spacing: 2) {
+            HStack(spacing: 3) {
                 ForEach(NotchKitTab.allCases) { tab in
                     let isSelected = statusManager.selectedTab == tab
                     Button(action: {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                        withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) {
                             statusManager.selectedTab = tab
                         }
                     }) {
                         HStack(spacing: 5) {
                             Image(systemName: tab.iconName)
                                 .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                .foregroundColor(isSelected ? tab.accentColor : .secondary)
+
                             Text(tab.rawValue)
-                                .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                                .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
+                                .foregroundColor(isSelected ? .white : .secondary)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4.5)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
                         .background {
                             if isSelected {
-                                RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                                    .fill(Color.white.opacity(0.18))
-                                    .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 1)
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.white.opacity(0.18),
+                                                tab.accentColor.opacity(0.15)
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .shadow(color: Color.black.opacity(0.2), radius: 4, x: 0, y: 1)
                                     .overlay {
-                                        RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                                            .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5)
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .strokeBorder(
+                                                LinearGradient(
+                                                    colors: [
+                                                        tab.accentColor.opacity(0.55),
+                                                        Color.white.opacity(0.2)
+                                                    ],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ),
+                                                lineWidth: 0.75
+                                            )
                                     }
                             }
                         }
-                        .foregroundColor(isSelected ? .white : .secondary)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(2.5)
-            .background(Color.black.opacity(0.2))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(3)
+            .background(Color.black.opacity(0.25))
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
             }
+            .fixedSize()
 
             Spacer(minLength: 4)
 

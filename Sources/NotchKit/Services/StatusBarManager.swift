@@ -48,7 +48,7 @@ public final class StatusBarManager: NSObject, ObservableObject {
               let batteryVM = batteryViewModel else { return }
 
         let popover = NSPopover()
-        popover.contentSize = NSSize(width: 440, height: 600)
+        popover.contentSize = NSSize(width: 485, height: 640)
         popover.behavior = .transient
         popover.animates = true
 
