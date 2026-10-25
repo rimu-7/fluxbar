@@ -229,6 +229,42 @@ public final class DatabaseManager: @unchecked Sendable {
 
     // MARK: - Maintenance & Optimization
 
+    /// Runs automated retention and capacity pruning.
+    /// Pinned clips are NEVER deleted automatically.
+    @discardableResult
+    public func performCleanup() throws -> Int {
+        try dbWriter.write { db in
+            var deletedTotal = 0
+
+            // 1. Time-based retention (if retentionDays > 0)
+            let retentionSql = """
+            DELETE FROM clip_items
+            WHERE isPinned = 0
+              AND (SELECT retentionDays FROM app_settings WHERE id = 1) > 0
+              AND updatedAt < datetime('now', '-' || (SELECT retentionDays FROM app_settings WHERE id = 1) || ' days');
+            """
+            try db.execute(sql: retentionSql)
+            deletedTotal += db.changesCount
+
+            // 2. Capacity-based limit (if maxHistory > 0)
+            let capacitySql = """
+            DELETE FROM clip_items
+            WHERE isPinned = 0
+              AND (SELECT maxHistory FROM app_settings WHERE id = 1) > 0
+              AND id NOT IN (
+                  SELECT id FROM clip_items
+                  WHERE isPinned = 0
+                  ORDER BY updatedAt DESC
+                  LIMIT (SELECT maxHistory FROM app_settings WHERE id = 1)
+              );
+            """
+            try db.execute(sql: capacitySql)
+            deletedTotal += db.changesCount
+
+            return deletedTotal
+        }
+    }
+
     public func optimizeDatabase() throws {
         try dbWriter.writeWithoutTransaction { db in
             try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE);")

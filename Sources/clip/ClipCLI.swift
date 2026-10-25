@@ -301,7 +301,8 @@ struct StatsCommand: ParsableCommand {
         print("Total Clips:        \(stats.totalClips)")
         print("Pinned Clips:       \(stats.pinnedClips)")
         print("Unpinned Clips:     \(stats.totalClips - stats.pinnedClips)")
-        print("Max History Limit:  \(settings.maxHistory)")
+        print("Max History Limit:  \(settings.maxHistory == 0 ? "UNLIMITED" : "\(settings.maxHistory)")")
+        print("Auto-Delete Age:    \(settings.retentionDays == 0 ? "NEVER" : "\(settings.retentionDays) days")")
         print("Recording Status:   \(settings.isPaused ? "PAUSED" : "ACTIVE")")
         print("Ignore Concealed:   \(settings.ignoreConcealed ? "ENABLED" : "DISABLED")")
     }

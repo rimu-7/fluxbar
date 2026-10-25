@@ -42,7 +42,8 @@ let testMethods = [
     ("testFTS5FullTextSearch", "testFTS5FullTextSearchAndReturnError:"),
     ("testDeleteAndClearUnpinned", "testDeleteAndClearUnpinnedAndReturnError:"),
     ("testRichFormatsAndFormatPreservation", "testRichFormatsAndFormatPreservationAndReturnError:"),
-    ("testDeleteAllClips", "testDeleteAllClipsAndReturnError:")
+    ("testDeleteAllClips", "testDeleteAllClipsAndReturnError:"),
+    ("testRetentionDaysAgePruningAndUnlimitedHistory", "testRetentionDaysAgePruningAndUnlimitedHistoryAndReturnError:")
 ]
 
 var passed = 0

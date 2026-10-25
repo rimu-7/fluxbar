@@ -12,6 +12,7 @@ public final class PasteboardService: ObservableObject {
     private let pasteboard = NSPasteboard.general
     private let dbManager: DatabaseManager
     private var timer: Timer?
+    private var cleanupTimer: Timer?
     private var lastChangeCount: Int
     private var lastInternalChangeCount: Int = -1
 
@@ -33,6 +34,11 @@ public final class PasteboardService: ObservableObject {
     public func startMonitoring(interval: TimeInterval = 0.4) {
         stopMonitoring()
         self.lastChangeCount = pasteboard.changeCount
+
+        // 1. Initial cleanup at startup
+        _ = try? dbManager.performCleanup()
+
+        // 2. High-frequency pasteboard polling
         self.timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.checkForChanges()
@@ -41,11 +47,23 @@ public final class PasteboardService: ObservableObject {
         if let timer = timer {
             RunLoop.main.add(timer, forMode: .common)
         }
+
+        // 3. Automated retention cleanup every 30 minutes (1800s)
+        self.cleanupTimer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                _ = try? self?.dbManager.performCleanup()
+            }
+        }
+        if let cleanupTimer = cleanupTimer {
+            RunLoop.main.add(cleanupTimer, forMode: .common)
+        }
     }
 
     public func stopMonitoring() {
         timer?.invalidate()
         timer = nil
+        cleanupTimer?.invalidate()
+        cleanupTimer = nil
     }
 
     public func checkForChanges() {

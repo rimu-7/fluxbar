@@ -22,6 +22,8 @@ public final class ClipBarViewModel: ObservableObject {
     @Published public var copiedClipId: Int64?
     @Published public var showingSettings: Bool = false
 
+    public var dbPath: String? { dbManager.dbPath }
+
     private let dbManager: DatabaseManager
     private let pasteboardService: PasteboardService
     private var clipsCancellable: AnyDatabaseCancellable?

@@ -205,4 +205,58 @@ final class DatabasePerformanceTests: XCTestCase {
         clips = try dbManager.queryClips(searchQuery: "", limit: 100)
         XCTAssertEqual(clips.count, 0)
     }
+
+    // MARK: - Test 7: Retention Days & Unlimited Capacity Cleanup
+
+    func testRetentionDaysAgePruningAndUnlimitedHistory() throws {
+        // Initially set retention to 0 (Never), maxHistory to 0 (Unlimited)
+        var settings = try dbManager.fetchSettings()
+        settings.retentionDays = 0
+        settings.maxHistory = 0
+        try dbManager.updateSettings(settings)
+
+        // Insert fresh clip
+        let freshClip = try dbManager.recordClip(content: "Fresh clip from today")
+
+        // Insert pinned clip
+        let pinnedClip = try dbManager.recordClip(content: "Pinned old clip")
+        try dbManager.togglePin(id: pinnedClip.id!)
+
+        // Insert old unpinned clip (10 days old) while retention is 0
+        let tenDaysAgo = Calendar.current.date(byAdding: .day, value: -10, to: Date())!
+        try dbManager.dbWriter.write { db in
+            try db.execute(
+                sql: "INSERT INTO clip_items (content, contentHash, charCount, lineCount, isPinned, createdAt, updatedAt) VALUES (?, ?, ?, ?, 0, ?, ?);",
+                arguments: ["Old clip", "oldhash123", 8, 1, tenDaysAgo, tenDaysAgo]
+            )
+        }
+
+        // 1. Verify all 3 exist initially
+        var clips = try dbManager.queryClips(searchQuery: "", limit: 100)
+        XCTAssertEqual(clips.count, 3)
+
+        // 2. Enable 7-day retention and run performCleanup()
+        settings.retentionDays = 7
+        try dbManager.updateSettings(settings)
+
+        let deleted = try dbManager.performCleanup()
+        XCTAssertEqual(deleted, 1, "Only the 10-day old unpinned clip should be pruned")
+
+        // Fresh clip and pinned clip must remain
+        clips = try dbManager.queryClips(searchQuery: "", limit: 100)
+        XCTAssertEqual(clips.count, 2)
+        let remainingIds = clips.compactMap(\.id)
+        XCTAssertTrue(remainingIds.contains(freshClip.id!))
+        XCTAssertTrue(remainingIds.contains(pinnedClip.id!))
+
+        // 3. Test that inserting an old clip while retentionDays=7 is immediately pruned by SQLite trigger
+        try dbManager.dbWriter.write { db in
+            try db.execute(
+                sql: "INSERT INTO clip_items (content, contentHash, charCount, lineCount, isPinned, createdAt, updatedAt) VALUES (?, ?, ?, ?, 0, ?, ?);",
+                arguments: ["Another old clip", "oldhash456", 16, 1, tenDaysAgo, tenDaysAgo]
+            )
+        }
+        clips = try dbManager.queryClips(searchQuery: "", limit: 100)
+        XCTAssertEqual(clips.count, 2, "Old clip should be pruned immediately by the SQLite trigger on insert")
+    }
 }
