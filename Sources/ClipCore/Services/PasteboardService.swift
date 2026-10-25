@@ -11,6 +11,8 @@ public final class PasteboardService: ObservableObject {
     private var lastChangeCount: Int
     private var lastInternalChangeCount: Int = -1
 
+    public var onClipRecorded: (@MainActor (ClipItem) -> Void)?
+
     /// Markers used by password managers (1Password, Bitwarden, Keychain, etc.)
     public static let concealedPasteboardTypes: [NSPasteboard.PasteboardType] = [
         NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"),
@@ -67,9 +69,40 @@ public final class PasteboardService: ObservableObject {
             }
         }
 
-        guard let string = pasteboard.string(forType: .string),
-              !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        // 1. Detect file URLs
+        var fileURLString: String?
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], let firstURL = urls.first {
+            fileURLString = firstURL.absoluteString
+        }
+
+        // 2. Detect Rich Text Format (RTF) data
+        let rtfData = pasteboard.data(forType: .rtf)
+
+        // 3. Detect HTML string
+        let htmlString = pasteboard.string(forType: .html)
+
+        // 4. Plain text content
+        var contentString = pasteboard.string(forType: .string)
+        if (contentString == nil || contentString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true), let fUrl = fileURLString {
+            contentString = URL(string: fUrl)?.lastPathComponent ?? fUrl
+        }
+
+        guard let string = contentString, !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
+        }
+
+        // 5. Determine format type
+        let formatType: String
+        if fileURLString != nil {
+            formatType = "file"
+        } else if rtfData != nil {
+            formatType = "doc"
+        } else if htmlString != nil {
+            formatType = "html"
+        } else if ClipItem(content: string).isCodeSnippet {
+            formatType = "code"
+        } else {
+            formatType = "text"
         }
 
         // Capture frontmost application metadata
@@ -81,21 +114,43 @@ public final class PasteboardService: ObservableObject {
         }
 
         do {
-            try dbManager.recordClip(
+            let saved = try dbManager.recordClip(
                 content: string,
                 sourceAppBundleId: bundleId,
-                sourceAppName: appName
+                sourceAppName: appName,
+                formatType: formatType,
+                rtfData: rtfData,
+                htmlContent: htmlString,
+                fileURL: fileURLString
             )
+            onClipRecorded?(saved)
         } catch {
             // Silently handle error or log
         }
     }
 
-    /// Copies content into NSPasteboard, prevents circular watcher triggering,
+    /// Copies content into NSPasteboard preserving rich formatting, prevents circular watcher triggering,
     /// and updates the clip's updatedAt in SQLite.
-    public func copyToPasteboard(content: String, sourceAppBundleId: String? = nil, sourceAppName: String? = nil) {
+    public func copyToPasteboard(item: ClipItem) {
         pasteboard.clearContents()
-        pasteboard.setString(content, forType: .string)
+
+        // 1. Set file URL if present
+        if let fileStr = item.fileURL, let url = URL(string: fileStr) {
+            pasteboard.writeObjects([url as NSPasteboardWriting])
+        }
+
+        // 2. Set plain text
+        pasteboard.setString(item.content, forType: .string)
+
+        // 3. Set RTF data if present (for Pages, Word, Notes, Google Docs, Slack, etc.)
+        if let rtf = item.rtfData {
+            pasteboard.setData(rtf, forType: .rtf)
+        }
+
+        // 4. Set HTML data if present
+        if let html = item.htmlContent {
+            pasteboard.setString(html, forType: .html)
+        }
 
         // Track internal change count
         let newCount = pasteboard.changeCount
@@ -104,17 +159,22 @@ public final class PasteboardService: ObservableObject {
 
         // Update database record timestamp and copy count
         _ = try? dbManager.recordClip(
+            content: item.content,
+            sourceAppBundleId: item.sourceAppBundleId,
+            sourceAppName: item.sourceAppName,
+            formatType: item.formatType,
+            rtfData: item.rtfData,
+            htmlContent: item.htmlContent,
+            fileURL: item.fileURL
+        )
+    }
+
+    public func copyToPasteboard(content: String, sourceAppBundleId: String? = nil, sourceAppName: String? = nil) {
+        let dummyItem = ClipItem(
             content: content,
             sourceAppBundleId: sourceAppBundleId,
             sourceAppName: sourceAppName
         )
-    }
-
-    public func copyToPasteboard(item: ClipItem) {
-        copyToPasteboard(
-            content: item.content,
-            sourceAppBundleId: item.sourceAppBundleId,
-            sourceAppName: item.sourceAppName
-        )
+        copyToPasteboard(item: dummyItem)
     }
 }

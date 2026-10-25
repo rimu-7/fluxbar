@@ -30,6 +30,10 @@ public enum Migrations {
                     sourceAppName TEXT,
                     copyCount INTEGER NOT NULL DEFAULT 1,
                     isPinned BOOLEAN NOT NULL DEFAULT 0,
+                    formatType TEXT NOT NULL DEFAULT 'text',
+                    rtfData BLOB,
+                    htmlContent TEXT,
+                    fileURL TEXT,
                     createdAt DATETIME NOT NULL,
                     updatedAt DATETIME NOT NULL
                 );
@@ -98,6 +102,24 @@ public enum Migrations {
                 PRAGMA wal_autocheckpoint = 25;
                 PRAGMA journal_size_limit = 65536;
             """)
+        }
+
+        migrator.registerMigration("v3_rich_formats") { db in
+            // Check and add rich format columns if migrating from an older DB
+            let columns = try db.columns(in: "clip_items")
+            let names = Set(columns.map(\.name))
+            if !names.contains("formatType") {
+                try db.execute(sql: "ALTER TABLE clip_items ADD COLUMN formatType TEXT NOT NULL DEFAULT 'text';")
+            }
+            if !names.contains("rtfData") {
+                try db.execute(sql: "ALTER TABLE clip_items ADD COLUMN rtfData BLOB;")
+            }
+            if !names.contains("htmlContent") {
+                try db.execute(sql: "ALTER TABLE clip_items ADD COLUMN htmlContent TEXT;")
+            }
+            if !names.contains("fileURL") {
+                try db.execute(sql: "ALTER TABLE clip_items ADD COLUMN fileURL TEXT;")
+            }
         }
 
         return migrator

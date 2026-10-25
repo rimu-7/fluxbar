@@ -243,15 +243,20 @@ struct DeleteCommand: ParsableCommand {
 struct ClearCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "clear",
-        abstract: "Clear all unpinned clips from history"
+        abstract: "Clear clips from history"
     )
+
+    @Flag(name: .long, help: "Delete ALL clips including pinned items (fresh start)")
+    var all: Bool = false
 
     @Flag(name: .shortAndLong, help: "Bypass confirmation prompt")
     var force: Bool = false
 
     func run() throws {
+        let db = DatabaseManager.shared
         if !force {
-            print("Are you sure you want to delete all unpinned clips? (y/N): ", terminator: "")
+            let promptMsg = all ? "Are you sure you want to delete ALL clips (including pinned)? (y/N): " : "Are you sure you want to delete all unpinned clips? (y/N): "
+            print(promptMsg, terminator: "")
             fflush(stdout)
             guard let line = readLine(), line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "y" else {
                 print("Aborted.")
@@ -259,9 +264,13 @@ struct ClearCommand: ParsableCommand {
             }
         }
 
-        let db = DatabaseManager.shared
-        try db.clearUnpinned()
-        print("All unpinned history cleared.")
+        if all {
+            try db.deleteAllClips()
+            print("All clips (including pinned) permanently deleted.")
+        } else {
+            try db.clearUnpinned()
+            print("All unpinned history cleared.")
+        }
     }
 }
 

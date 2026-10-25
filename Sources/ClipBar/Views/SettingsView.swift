@@ -6,7 +6,8 @@ public struct SettingsView: View {
     @State private var maxHistory: Int
     @State private var isPaused: Bool
     @State private var ignoreConcealed: Bool
-    @State private var showingClearConfirmation: Bool = false
+    @State private var showingClearUnpinnedConfirmation: Bool = false
+    @State private var showingDeleteAllConfirmation: Bool = false
 
     public init(viewModel: ClipBarViewModel) {
         self.viewModel = viewModel
@@ -164,29 +165,104 @@ public struct SettingsView: View {
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.secondary)
 
-                        Button(action: { showingClearConfirmation = true }) {
-                            HStack {
-                                Image(systemName: "trash")
-                                    .foregroundColor(.red)
-                                Text("Clear Unpinned History")
-                                    .foregroundColor(.red)
-                                    .font(.system(size: 12, weight: .medium))
-                                Spacer()
+                        // 1. Clear Unpinned History
+                        if showingClearUnpinnedConfirmation {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Clear unpinned clips? Pinned clips will be kept.")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                HStack(spacing: 8) {
+                                    Button("Cancel") {
+                                        showingClearUnpinnedConfirmation = false
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.primary.opacity(0.08))
+                                    .cornerRadius(4)
+
+                                    Button("Confirm Clear") {
+                                        viewModel.clearUnpinned()
+                                        showingClearUnpinnedConfirmation = false
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.orange.opacity(0.18))
+                                    .foregroundColor(.orange)
+                                    .cornerRadius(4)
+                                }
                             }
-                            .padding(.vertical, 4)
+                            .padding(8)
+                            .background(Color.orange.opacity(0.06))
+                            .cornerRadius(6)
+                        } else {
+                            Button(action: {
+                                showingClearUnpinnedConfirmation = true
+                                showingDeleteAllConfirmation = false
+                            }) {
+                                HStack {
+                                    Image(systemName: "trash")
+                                        .foregroundColor(.orange)
+                                    Text("Clear Unpinned History")
+                                        .foregroundColor(.orange)
+                                        .font(.system(size: 12, weight: .medium))
+                                    Spacer()
+                                }
+                                .padding(.vertical, 3)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        .confirmationDialog(
-                            "Clear Unpinned History?",
-                            isPresented: $showingClearConfirmation,
-                            titleVisibility: .visible
-                        ) {
-                            Button("Clear All Unpinned Clips", role: .destructive) {
-                                viewModel.clearUnpinned()
+
+                        Divider().padding(.vertical, 2)
+
+                        // 2. Delete All Clips (Fresh Start)
+                        if showingDeleteAllConfirmation {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("⚠️ Delete ALL clips including pinned items?")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.red)
+                                HStack(spacing: 8) {
+                                    Button("Cancel") {
+                                        showingDeleteAllConfirmation = false
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.primary.opacity(0.08))
+                                    .cornerRadius(4)
+
+                                    Button("Delete Everything") {
+                                        viewModel.deleteAllClips()
+                                        showingDeleteAllConfirmation = false
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.red)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(4)
+                                }
                             }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text("This will permanently remove all non-pinned clips from SQLite. Pinned clips will not be deleted.")
+                            .padding(8)
+                            .background(Color.red.opacity(0.08))
+                            .cornerRadius(6)
+                        } else {
+                            Button(action: {
+                                showingDeleteAllConfirmation = true
+                                showingClearUnpinnedConfirmation = false
+                            }) {
+                                HStack {
+                                    Image(systemName: "xmark.bin")
+                                        .foregroundColor(.red)
+                                    Text("Delete All Clips (Fresh Start)")
+                                        .foregroundColor(.red)
+                                        .font(.system(size: 12, weight: .medium))
+                                    Spacer()
+                                }
+                                .padding(.vertical, 3)
+                            }
+                            .buttonStyle(.plain)
                         }
 
                         Divider().padding(.vertical, 2)
@@ -198,9 +274,9 @@ public struct SettingsView: View {
                                 Text("Quit ClipSuite")
                                     .foregroundColor(.secondary)
                                     .font(.system(size: 12, weight: .medium))
-                                Spacer()
+                                    Spacer()
                             }
-                            .padding(.vertical, 4)
+                            .padding(.vertical, 3)
                         }
                         .buttonStyle(.plain)
                     }

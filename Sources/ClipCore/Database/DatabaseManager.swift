@@ -83,7 +83,11 @@ public final class DatabaseManager: @unchecked Sendable {
     public func recordClip(
         content: String,
         sourceAppBundleId: String? = nil,
-        sourceAppName: String? = nil
+        sourceAppName: String? = nil,
+        formatType: String = "text",
+        rtfData: Data? = nil,
+        htmlContent: String? = nil,
+        fileURL: String? = nil
     ) throws -> ClipItem {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -100,19 +104,24 @@ public final class DatabaseManager: @unchecked Sendable {
             INSERT INTO clip_items (
                 content, contentHash, charCount, lineCount,
                 sourceAppBundleId, sourceAppName, copyCount, isPinned,
+                formatType, rtfData, htmlContent, fileURL,
                 createdAt, updatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(contentHash) DO UPDATE SET
                 updatedAt = excluded.updatedAt,
                 copyCount = clip_items.copyCount + 1,
                 sourceAppBundleId = coalesce(excluded.sourceAppBundleId, clip_items.sourceAppBundleId),
-                sourceAppName = coalesce(excluded.sourceAppName, clip_items.sourceAppName)
+                sourceAppName = coalesce(excluded.sourceAppName, clip_items.sourceAppName),
+                formatType = coalesce(excluded.formatType, clip_items.formatType),
+                rtfData = coalesce(excluded.rtfData, clip_items.rtfData),
+                htmlContent = coalesce(excluded.htmlContent, clip_items.htmlContent),
+                fileURL = coalesce(excluded.fileURL, clip_items.fileURL)
             RETURNING *;
             """
             guard let item = try ClipItem.fetchOne(
                 db,
                 sql: sql,
-                arguments: [content, hash, charCount, lineCount, sourceAppBundleId, sourceAppName, now, now]
+                arguments: [content, hash, charCount, lineCount, sourceAppBundleId, sourceAppName, formatType, rtfData, htmlContent, fileURL, now, now]
             ) else {
                 throw DatabaseError(message: "Failed to fetch saved clip item")
             }
@@ -207,10 +216,18 @@ public final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    public func deleteAllClips() throws {
+        try dbWriter.write { db in
+            try db.execute(sql: "DELETE FROM clip_items;")
+            try db.execute(sql: "DELETE FROM clip_items_fts;")
+        }
+        try? optimizeDatabase()
+    }
+
     // MARK: - Maintenance & Optimization
 
     public func optimizeDatabase() throws {
-        try dbWriter.write { db in
+        try dbWriter.writeWithoutTransaction { db in
             try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE);")
             try db.execute(sql: "PRAGMA optimize;")
         }
@@ -235,8 +252,8 @@ public final class DatabaseManager: @unchecked Sendable {
     // MARK: - Stats
 
     public func getDatabaseStats() throws -> DatabaseStats {
-        // Attempt a passive WAL checkpoint to minimize WAL file size before checking
-        _ = try? dbWriter.write { db in
+        // Attempt a passive WAL checkpoint outside of transaction
+        dbWriter.writeWithoutTransaction { db in
             try? db.execute(sql: "PRAGMA wal_checkpoint(PASSIVE);")
         }
 

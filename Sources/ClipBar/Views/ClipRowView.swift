@@ -61,6 +61,41 @@ public struct ClipRowView: View {
 
                 // Metadata Footer
                 HStack(spacing: 4) {
+                    if item.isCodeSnippet {
+                        Text("CODE")
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                            .foregroundColor(.accentColor)
+                            .padding(.horizontal, 3.5)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.12))
+                            .cornerRadius(3)
+                        Text("•")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary.opacity(0.5))
+                    } else if item.isDocument {
+                        Text("DOC")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .foregroundColor(.purple)
+                            .padding(.horizontal, 3.5)
+                            .padding(.vertical, 1)
+                            .background(Color.purple.opacity(0.12))
+                            .cornerRadius(3)
+                        Text("•")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary.opacity(0.5))
+                    } else if item.isFile {
+                        Text("FILE")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .foregroundColor(.teal)
+                            .padding(.horizontal, 3.5)
+                            .padding(.vertical, 1)
+                            .background(Color.teal.opacity(0.12))
+                            .cornerRadius(3)
+                        Text("•")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary.opacity(0.5))
+                    }
+
                     if let appName = item.sourceAppName, !appName.isEmpty {
                         Image(systemName: "app.badge")
                             .font(.system(size: 9))

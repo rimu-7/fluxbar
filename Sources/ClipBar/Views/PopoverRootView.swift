@@ -22,6 +22,8 @@ public struct PopoverRootView: View {
         .frame(width: 380, height: 500)
         .background(.ultraThinMaterial)
         .onAppear {
+            PasteboardService.shared.checkForChanges()
+            viewModel.refreshClips()
             isSearchFocused = true
             setupKeyboardMonitor()
         }

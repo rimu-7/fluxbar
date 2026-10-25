@@ -40,7 +40,9 @@ let testMethods = [
     ("testAtomicUpsertDeduplication", "testAtomicUpsertDeduplicationAndReturnError:"),
     ("testPruningTriggerPreservesPinnedAndEnforcesMaxHistory", "testPruningTriggerPreservesPinnedAndEnforcesMaxHistoryAndReturnError:"),
     ("testFTS5FullTextSearch", "testFTS5FullTextSearchAndReturnError:"),
-    ("testDeleteAndClearUnpinned", "testDeleteAndClearUnpinnedAndReturnError:")
+    ("testDeleteAndClearUnpinned", "testDeleteAndClearUnpinnedAndReturnError:"),
+    ("testRichFormatsAndFormatPreservation", "testRichFormatsAndFormatPreservationAndReturnError:"),
+    ("testDeleteAllClips", "testDeleteAllClipsAndReturnError:")
 ]
 
 var passed = 0

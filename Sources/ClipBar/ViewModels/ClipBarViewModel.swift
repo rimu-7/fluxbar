@@ -33,10 +33,17 @@ public final class ClipBarViewModel: ObservableObject {
         pasteboardService: PasteboardService? = nil
     ) {
         self.dbManager = databaseManager
-        self.pasteboardService = pasteboardService ?? PasteboardService.shared
+        let service = pasteboardService ?? PasteboardService.shared
+        self.pasteboardService = service
 
         setupObservations()
+        refreshClips()
         refreshStats()
+
+        // Real-time notification hook when new clips are copied
+        service.onClipRecorded = { [weak self] _ in
+            self?.refreshClips()
+        }
     }
 
     public func setupObservations() {
@@ -59,11 +66,23 @@ public final class ClipBarViewModel: ObservableObject {
         // Debounce search input and restart observation
         searchDebounce = Publishers.CombineLatest($searchQuery, $filterMode)
             .dropFirst()
-            .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
+            .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.selectedIndex = 0
                 self?.restartClipsObservation()
             }
+    }
+
+    public func refreshClips() {
+        let currentQuery = searchQuery
+        let pinnedOnly = (filterMode == .pinned)
+        if let updated = try? dbManager.queryClips(searchQuery: currentQuery, limit: 150, pinnedOnly: pinnedOnly) {
+            self.clips = updated
+            if self.selectedIndex >= updated.count {
+                self.selectedIndex = max(0, updated.count - 1)
+            }
+            self.refreshStats()
+        }
     }
 
     private func restartClipsObservation() {
@@ -71,6 +90,9 @@ public final class ClipBarViewModel: ObservableObject {
 
         let currentQuery = searchQuery
         let pinnedOnly = (filterMode == .pinned)
+
+        // Synchronously load first
+        refreshClips()
 
         clipsCancellable = dbManager.makeClipsObservation(
             searchQuery: { currentQuery },
@@ -126,7 +148,7 @@ public final class ClipBarViewModel: ObservableObject {
         guard let id = item.id else { return }
         do {
             try dbManager.togglePin(id: id)
-            refreshStats()
+            refreshClips()
         } catch {
             print("Failed to toggle pin for clip #\(id): \(error)")
         }
@@ -141,7 +163,7 @@ public final class ClipBarViewModel: ObservableObject {
         guard let id = item.id else { return }
         do {
             try dbManager.deleteClip(id: id)
-            refreshStats()
+            refreshClips()
         } catch {
             print("Failed to delete clip #\(id): \(error)")
         }
@@ -153,8 +175,21 @@ public final class ClipBarViewModel: ObservableObject {
     }
 
     public func clearUnpinned() {
-        try? dbManager.clearUnpinned()
-        refreshStats()
+        do {
+            try dbManager.clearUnpinned()
+            refreshClips()
+        } catch {
+            print("Failed to clear unpinned: \(error)")
+        }
+    }
+
+    public func deleteAllClips() {
+        do {
+            try dbManager.deleteAllClips()
+            refreshClips()
+        } catch {
+            print("Failed to delete all clips: \(error)")
+        }
     }
 
     public func optimizeStorage() {

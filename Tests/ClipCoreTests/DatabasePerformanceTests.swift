@@ -155,4 +155,48 @@ final class DatabasePerformanceTests: XCTestCase {
         XCTAssertEqual(remaining.count, 1)
         XCTAssertEqual(remaining.first?.id, clip1.id)
     }
+
+    // MARK: - Test 5: Rich Formatting & Format Preservation
+
+    func testRichFormatsAndFormatPreservation() throws {
+        let rtfSample = Data("{\\rtf1\\ansi\\b Rich Document Text\\b0}".utf8)
+        let htmlSample = "<strong>Rich Document Text</strong>"
+
+        let docClip = try dbManager.recordClip(
+            content: "Rich Document Text",
+            sourceAppName: "Microsoft Word",
+            formatType: "doc",
+            rtfData: rtfSample,
+            htmlContent: htmlSample
+        )
+
+        XCTAssertEqual(docClip.formatType, "doc")
+        XCTAssertEqual(docClip.rtfData, rtfSample)
+        XCTAssertEqual(docClip.htmlContent, htmlSample)
+        XCTAssertTrue(docClip.isDocument)
+
+        let codeClip = try dbManager.recordClip(
+            content: "func calculateTotal() -> Int {\n    return 42\n}",
+            sourceAppName: "Xcode",
+            formatType: "code"
+        )
+        XCTAssertEqual(codeClip.formatType, "code")
+        XCTAssertTrue(codeClip.isCodeSnippet)
+    }
+
+    // MARK: - Test 6: Delete All Clips (Fresh Start)
+
+    func testDeleteAllClips() throws {
+        _ = try dbManager.recordClip(content: "Clip A")
+        let clipB = try dbManager.recordClip(content: "Clip B")
+        try dbManager.togglePin(id: clipB.id!)
+
+        var clips = try dbManager.queryClips(searchQuery: "", limit: 100)
+        XCTAssertEqual(clips.count, 2)
+
+        // Delete all clips wipes both pinned and unpinned
+        try dbManager.deleteAllClips()
+        clips = try dbManager.queryClips(searchQuery: "", limit: 100)
+        XCTAssertEqual(clips.count, 0)
+    }
 }
