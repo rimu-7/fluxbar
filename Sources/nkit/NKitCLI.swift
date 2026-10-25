@@ -29,6 +29,7 @@ struct ClipCommand: ParsableCommand {
         abstract: "Manage clipboard history, search clips, and copy/paste",
         subcommands: [
             ClipListCommand.self,
+            ClipGetCommand.self,
             ClipCopyCommand.self,
             ClipPasteCommand.self,
             ClipClearCommand.self,
@@ -92,6 +93,37 @@ struct ClipListCommand: ParsableCommand {
 
             print("\(pad(idStr, 6)) \(pad(pinMark, 4)) \(pad(copyStr, 7)) \(pad(timeStr, 10)) \(pad(appStr, 14)) \(preview)")
         }
+    }
+}
+
+struct ClipGetCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "get", abstract: "Display the full content of a specific clip")
+
+    @Argument(help: "Clip numeric ID (e.g. 1)")
+    var id: Int64
+
+    @Flag(name: .long, help: "Output as raw JSON")
+    var json: Bool = false
+
+    func run() throws {
+        let db = DatabaseManager.shared
+        guard let clip = try db.fetchClip(id: id) else {
+            print("❌ Clip #\(id) not found.")
+            return
+        }
+
+        if json {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(clip)
+            if let output = String(data: data, encoding: .utf8) {
+                print(output)
+            }
+            return
+        }
+
+        print(clip.content)
     }
 }
 
@@ -202,7 +234,9 @@ struct PowerCommand: ParsableCommand {
             PowerStatusCommand.self,
             PowerLimitCommand.self,
             PowerBypassCommand.self,
-            PowerMagSafeCommand.self
+            PowerDischargeCommand.self,
+            PowerMagSafeCommand.self,
+            PowerAuthorizeCommand.self
         ],
         defaultSubcommand: PowerStatusCommand.self
     )
@@ -352,6 +386,46 @@ struct PowerMagSafeCommand: ParsableCommand {
             print("✅ MagSafe 3 LED set to: \(isGreen ? "Green (Bypass / Full)" : "Auto (Apple Default)")")
         } else {
             print("⚠️ Could not adjust MagSafe LED directly. Elevated privileges required.")
+        }
+    }
+}
+
+struct PowerDischargeCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "discharge", abstract: "Force battery discharge on AC power down to limit")
+
+    @Argument(help: "State: on or off")
+    var state: String
+
+    func run() throws {
+        let enable = (state.lowercased() == "on" || state.lowercased() == "1" || state.lowercased() == "true")
+        let success = SMCService.shared.setChargingInhibited(true, limitPercentage: 80, forceDischarge: enable)
+        if success {
+            print("✅ Force discharge on AC set to: \(enable ? "ON (Active Discharge)" : "OFF (Normal AC Inhibit)")")
+        } else {
+            print("⚠️ Could not adjust discharge state directly. Elevated privileges required.")
+            print("   Run: sudo nkit power discharge \(state)")
+        }
+    }
+}
+
+struct PowerAuthorizeCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "authorize", abstract: "Authorize SMC hardware limiter daemon via Touch ID / Password")
+
+    func run() throws {
+        print("Authorizing com.notchkit.powerd privileged helper...")
+        let semaphore = DispatchSemaphore(value: 0)
+        var success = false
+
+        Task {
+            success = await PowerHelperManager.requestHelperInstallation()
+            semaphore.signal()
+        }
+        semaphore.wait()
+
+        if success {
+            print("✅ Successfully authorized and installed com.notchkit.powerd!")
+        } else {
+            print("❌ Authorization cancelled or failed. You can also run 'make install-helper'.")
         }
     }
 }

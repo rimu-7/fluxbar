@@ -149,4 +149,50 @@ public final class BatteryLimiterTests: XCTestCase {
         XCTAssertEqual(PowerSettings.default.chargeLimit, 80)
         XCTAssertTrue(PowerSettings.default.isLimiterEnabled)
     }
+
+    public func testThermalCutoutGuard() throws {
+        let limiter = ChargeLimiter(
+            isLimiterEnabled: true,
+            chargeLimit: 80,
+            hysteresis: 3
+        )
+
+        // Normal temperature (32.0°C) below charge limit -> charging normally, bypass inactive
+        let normalTelemetry = BatteryTelemetry(
+            percentage: 60,
+            isCharging: true,
+            isPluggedIn: true,
+            temperature: 32.0,
+            chargingState: .charging,
+            isBypassed: false
+        )
+        limiter.evaluateCurrentState(telemetry: normalTelemetry)
+        XCTAssertFalse(limiter.isAdapterBypassActive)
+
+        // Thermal surge (41.5°C > 40.0°C) -> Cutout must immediately engage bypass to stop charging
+        let hotTelemetry = BatteryTelemetry(
+            percentage: 60,
+            isCharging: true,
+            isPluggedIn: true,
+            temperature: 41.5,
+            chargingState: .charging,
+            isBypassed: false
+        )
+        limiter.evaluateCurrentState(telemetry: hotTelemetry)
+        XCTAssertTrue(limiter.isAdapterBypassActive, "Thermal cutout guard must engage bypass when temperature > 40.0°C")
+    }
+
+    public func testSMCHardwareGenerationMatrix() throws {
+        let m2Key = SMCService.fourCharCode("CHTE")
+        XCTAssertEqual(SMCService.codeToString(m2Key), "CHTE")
+
+        let m1Key = SMCService.fourCharCode("CH0B")
+        XCTAssertEqual(SMCService.codeToString(m1Key), "CH0B")
+
+        let intelKey = SMCService.fourCharCode("BCLM")
+        XCTAssertEqual(SMCService.codeToString(intelKey), "BCLM")
+
+        let magSafeKey = SMCService.fourCharCode("ACLC")
+        XCTAssertEqual(SMCService.codeToString(magSafeKey), "ACLC")
+    }
 }

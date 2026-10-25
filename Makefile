@@ -20,13 +20,17 @@ install-cli: build
 	mkdir -p /usr/local/bin 2>/dev/null || true
 	cp .build/debug/nkit /usr/local/bin/nkit 2>/dev/null || cp .build/debug/nkit $(HOME)/.local/bin/nkit
 	cp .build/debug/clip /usr/local/bin/clip 2>/dev/null || cp .build/debug/clip $(HOME)/.local/bin/clip
+	cp .build/debug/com.notchkit.powerd /usr/local/bin/com.notchkit.powerd 2>/dev/null || true
 	@echo "✅ Installed 'nkit' and 'clip' CLI utilities successfully."
 
-install-helper:
-	@if [ -f /Library/PrivilegedHelperTools/wattbitd ]; then \
-		echo "Authorizing wattbitd helper for hardware charge limiting..."; \
-		sudo chmod 4755 /Library/PrivilegedHelperTools/wattbitd && echo "✅ Authorized successfully!" || echo "❌ Authorization cancelled."; \
-	fi
+install-helper: build
+	@echo "Installing NotchKit privileged power daemon (com.notchkit.powerd)..."
+	sudo mkdir -p /Library/PrivilegedHelperTools /usr/local/bin
+	sudo cp -f .build/debug/com.notchkit.powerd /Library/PrivilegedHelperTools/com.notchkit.powerd
+	sudo chown root:wheel /Library/PrivilegedHelperTools/com.notchkit.powerd
+	sudo chmod 755 /Library/PrivilegedHelperTools/com.notchkit.powerd
+	sudo cp -f /Library/PrivilegedHelperTools/com.notchkit.powerd /usr/local/bin/notchkit-power-helper
+	@echo "✅ Installed and authorized com.notchkit.powerd successfully!"
 
 clean:
 	swift package clean

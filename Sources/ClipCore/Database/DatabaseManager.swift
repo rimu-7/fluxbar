@@ -184,6 +184,18 @@ public final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    public func fetchClip(id: Int64) throws -> ClipItem? {
+        try dbWriter.read { db in
+            try ClipItem.fetchOne(db, sql: "SELECT * FROM clip_items WHERE id = ?;", arguments: [id])
+        }
+    }
+
+    public func fetchClip(hash: String) throws -> ClipItem? {
+        try dbWriter.read { db in
+            try ClipItem.fetchOne(db, sql: "SELECT * FROM clip_items WHERE contentHash = ?;", arguments: [hash])
+        }
+    }
+
     public static func sanitizeFTS5Query(_ query: String) -> String {
         // Strip unsafe FTS5 control characters and construct token prefix matching
         let clean = query.components(separatedBy: CharacterSet.alphanumerics.inverted)

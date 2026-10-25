@@ -25,6 +25,19 @@ public enum PowerHelperManager {
         return false
     }
 
+    public static func findBuiltDaemonBinary() -> String? {
+        let candidates = [
+            Bundle.main.bundlePath + "/Contents/MacOS/com.notchkit.powerd",
+            Bundle.main.bundlePath + "/Contents/MacOS/notchkit-power-helper",
+            "/usr/local/bin/com.notchkit.powerd",
+            "/usr/local/bin/notchkit-power-helper",
+            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("com.notchkit.powerd").path,
+            FileManager.default.currentDirectoryPath + "/.build/debug/com.notchkit.powerd",
+            FileManager.default.currentDirectoryPath + "/.build/release/com.notchkit.powerd"
+        ]
+        return candidates.first(where: { FileManager.default.fileExists(atPath: $0) })
+    }
+
     /// Set charge limit percentage on hardware asynchronously (non-blocking)
     @discardableResult
     public static func applyChargeLimit(_ percentage: Int) -> Bool {
@@ -88,7 +101,16 @@ public enum PowerHelperManager {
         }
 
         let script: String
-        if FileManager.default.fileExists(atPath: wattbitdPath) {
+        if let bin = findBuiltDaemonBinary() {
+            script = """
+            mkdir -p /Library/PrivilegedHelperTools /usr/local/bin
+            cp -f "\(bin)" "\(destinationPath)"
+            chown root:wheel "\(destinationPath)"
+            chmod 755 "\(destinationPath)"
+            cp -f "\(destinationPath)" "\(fallbackBinPath)"
+            "\(destinationPath)" limit 80
+            """
+        } else if FileManager.default.fileExists(atPath: wattbitdPath) {
             script = "\(wattbitdPath) limit 80"
         } else {
             script = """

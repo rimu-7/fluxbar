@@ -42,20 +42,21 @@ public final class ClipBlobManager: @unchecked Sendable {
         return storeBlob(data: data)
     }
 
-    /// Stores data with SHA-256 content addressing, returning `blob://<hash>` reference
+    /// Stores data with SHA-256 content addressing and AES-GCM encryption, returning `blob://<hash>` reference
     public func storeBlob(data: Data) -> String {
         createDirectoryIfNeeded()
         let hash = Self.computeHash(data: data)
         let fileURL = blobsDirectoryURL.appendingPathComponent("\(hash).bin")
 
         if !fileManager.fileExists(atPath: fileURL.path) {
-            try? data.write(to: fileURL, options: .atomic)
+            let payloadToStore = (try? ClipEncryptionManager.shared.encrypt(data: data)) ?? data
+            try? payloadToStore.write(to: fileURL, options: .atomic)
         }
 
         return "blob://\(hash)"
     }
 
-    /// Retrieves data from `blob://<hash>` reference or raw hash
+    /// Retrieves data from `blob://<hash>` reference or raw hash, decrypting AES-GCM payload
     public func retrieveBlob(reference: String) -> Data? {
         let hash: String
         if reference.hasPrefix("blob://") {
@@ -65,7 +66,10 @@ public final class ClipBlobManager: @unchecked Sendable {
         }
 
         let fileURL = blobsDirectoryURL.appendingPathComponent("\(hash).bin")
-        return try? Data(contentsOf: fileURL)
+        guard let rawData = try? Data(contentsOf: fileURL) else {
+            return nil
+        }
+        return ClipEncryptionManager.shared.decryptSafely(data: rawData)
     }
 
     /// Deletes a blob given its reference

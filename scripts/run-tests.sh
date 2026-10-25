@@ -107,7 +107,11 @@ let clipMethods = [
     ("testDeleteAndClearUnpinned", "testDeleteAndClearUnpinnedAndReturnError:"),
     ("testRichFormatsAndFormatPreservation", "testRichFormatsAndFormatPreservationAndReturnError:"),
     ("testDeleteAllClips", "testDeleteAllClipsAndReturnError:"),
-    ("testRetentionDaysAgePruningAndUnlimitedHistory", "testRetentionDaysAgePruningAndUnlimitedHistoryAndReturnError:")
+    ("testRetentionDaysAgePruningAndUnlimitedHistory", "testRetentionDaysAgePruningAndUnlimitedHistoryAndReturnError:"),
+    ("testCryptoKitAESGCMEncryptionAndKeychainKeyRoundtrip", "testCryptoKitAESGCMEncryptionAndKeychainKeyRoundtripAndReturnError:"),
+    ("testClipBlobManagerExternalizationAndEncryption", "testClipBlobManagerExternalizationAndEncryptionAndReturnError:"),
+    ("testConcealedTypeZeroSecretLeakageSanitizer", "testConcealedTypeZeroSecretLeakageSanitizerAndReturnError:"),
+    ("testFetchClipByIdAndHash", "testFetchClipByIdAndHashAndReturnError:")
 ]
 
 let netMethods = [
@@ -121,7 +125,9 @@ let powerMethods = [
     ("testBypassStateAndFormatting", "testBypassStateAndFormattingAndReturnError:"),
     ("testSMCFourCCEncoding", "testSMCFourCCEncodingAndReturnError:"),
     ("testChargeLimiterHysteresisLogic", "testChargeLimiterHysteresisLogicAndReturnError:"),
-    ("testPowerSettingsPresets", "testPowerSettingsPresetsAndReturnError:")
+    ("testPowerSettingsPresets", "testPowerSettingsPresetsAndReturnError:"),
+    ("testThermalCutoutGuard", "testThermalCutoutGuardAndReturnError:"),
+    ("testSMCHardwareGenerationMatrix", "testSMCHardwareGenerationMatrixAndReturnError:")
 ]
 
 let startTotal = Date()
