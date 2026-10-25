@@ -18,15 +18,26 @@ public struct SettingsView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // Frosted Header
             HStack {
-                Button(action: { viewModel.showingSettings = false }) {
-                    HStack(spacing: 4) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        viewModel.showingSettings = false
+                    }
+                }) {
+                    HStack(spacing: 5) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 11, weight: .semibold))
                         Text("Back")
-                            .font(.system(size: 12))
+                            .font(.system(size: 12, weight: .medium))
                     }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6.5)
+                            .fill(Color.white.opacity(0.08))
+                            .overlay(RoundedRectangle(cornerRadius: 6.5).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                    )
                 }
                 .buttonStyle(.plain)
 
@@ -38,21 +49,21 @@ public struct SettingsView: View {
                 Spacer()
 
                 // Balance spacer
-                Color.clear.frame(width: 44, height: 1)
+                Color.clear.frame(width: 54, height: 1)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color.primary.opacity(0.04))
+            .padding(.vertical, 11)
+            .background(Color.black.opacity(0.12))
 
-            Divider()
+            Divider().opacity(0.3)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    // Recording Section
+                VStack(alignment: .leading, spacing: 14) {
+                    // Recording Section Card
                     VStack(alignment: .leading, spacing: 10) {
                         Text("RECORDING & PRIVACY")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.secondary.opacity(0.8))
 
                         Toggle(isOn: $isPaused) {
                             VStack(alignment: .leading, spacing: 2) {
@@ -70,7 +81,7 @@ public struct SettingsView: View {
                             viewModel.updateSettings(updated)
                         }
 
-                        Divider().padding(.vertical, 2)
+                        Divider().opacity(0.2).padding(.vertical, 2)
 
                         Toggle(isOn: $ignoreConcealed) {
                             VStack(alignment: .leading, spacing: 2) {
@@ -88,15 +99,21 @@ public struct SettingsView: View {
                             viewModel.updateSettings(updated)
                         }
                     }
-                    .padding(12)
-                    .background(Color.primary.opacity(0.03))
-                    .cornerRadius(8)
+                    .padding(13)
+                    .background {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                            }
+                    }
 
-                    // History Limit Section
+                    // History Limit Section Card
                     VStack(alignment: .leading, spacing: 10) {
                         Text("STORAGE & HISTORY")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.secondary.opacity(0.8))
 
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -117,7 +134,7 @@ public struct SettingsView: View {
                                 }
                         }
 
-                        Divider().padding(.vertical, 2)
+                        Divider().opacity(0.2).padding(.vertical, 2)
 
                         // Live DB Stats
                         if let stats = viewModel.databaseStats {
@@ -139,7 +156,7 @@ public struct SettingsView: View {
                                     .foregroundColor(.secondary)
                             }
 
-                            Divider().padding(.vertical, 2)
+                            Divider().opacity(0.2).padding(.vertical, 2)
 
                             Button(action: { viewModel.optimizeStorage() }) {
                                 HStack(spacing: 6) {
@@ -155,51 +172,64 @@ public struct SettingsView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(12)
-                    .background(Color.primary.opacity(0.03))
-                    .cornerRadius(8)
+                    .padding(13)
+                    .background {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                            }
+                    }
 
-                    // Danger Zone / Maintenance
+                    // Data Management Card
                     VStack(alignment: .leading, spacing: 10) {
                         Text("DATA MANAGEMENT")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.secondary.opacity(0.8))
 
                         // 1. Clear Unpinned History
                         if showingClearUnpinnedConfirmation {
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 7) {
                                 Text("Clear unpinned clips? Pinned clips will be kept.")
                                     .font(.system(size: 11))
                                     .foregroundColor(.secondary)
                                 HStack(spacing: 8) {
                                     Button("Cancel") {
-                                        showingClearUnpinnedConfirmation = false
+                                        withAnimation(.easeInOut(duration: 0.12)) {
+                                            showingClearUnpinnedConfirmation = false
+                                        }
                                     }
                                     .buttonStyle(.plain)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(Color.primary.opacity(0.08))
-                                    .cornerRadius(4)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 3.5)
+                                    .background(Color.white.opacity(0.08))
+                                    .cornerRadius(5)
 
                                     Button("Confirm Clear") {
-                                        viewModel.clearUnpinned()
-                                        showingClearUnpinnedConfirmation = false
+                                        withAnimation(.easeInOut(duration: 0.12)) {
+                                            viewModel.clearUnpinned()
+                                            showingClearUnpinnedConfirmation = false
+                                        }
                                     }
                                     .buttonStyle(.plain)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(Color.orange.opacity(0.18))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 3.5)
+                                    .background(Color.orange.opacity(0.2))
                                     .foregroundColor(.orange)
-                                    .cornerRadius(4)
+                                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5))
+                                    .cornerRadius(5)
                                 }
                             }
-                            .padding(8)
-                            .background(Color.orange.opacity(0.06))
-                            .cornerRadius(6)
+                            .padding(9)
+                            .background(Color.orange.opacity(0.08))
+                            .cornerRadius(7)
                         } else {
                             Button(action: {
-                                showingClearUnpinnedConfirmation = true
-                                showingDeleteAllConfirmation = false
+                                withAnimation(.easeInOut(duration: 0.12)) {
+                                    showingClearUnpinnedConfirmation = true
+                                    showingDeleteAllConfirmation = false
+                                }
                             }) {
                                 HStack {
                                     Image(systemName: "trash")
@@ -209,48 +239,54 @@ public struct SettingsView: View {
                                         .font(.system(size: 12, weight: .medium))
                                     Spacer()
                                 }
-                                .padding(.vertical, 3)
+                                .padding(.vertical, 2)
                             }
                             .buttonStyle(.plain)
                         }
 
-                        Divider().padding(.vertical, 2)
+                        Divider().opacity(0.2).padding(.vertical, 2)
 
                         // 2. Delete All Clips (Fresh Start)
                         if showingDeleteAllConfirmation {
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 7) {
                                 Text("⚠️ Delete ALL clips including pinned items?")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(.red)
                                 HStack(spacing: 8) {
                                     Button("Cancel") {
-                                        showingDeleteAllConfirmation = false
+                                        withAnimation(.easeInOut(duration: 0.12)) {
+                                            showingDeleteAllConfirmation = false
+                                        }
                                     }
                                     .buttonStyle(.plain)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(Color.primary.opacity(0.08))
-                                    .cornerRadius(4)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 3.5)
+                                    .background(Color.white.opacity(0.08))
+                                    .cornerRadius(5)
 
                                     Button("Delete Everything") {
-                                        viewModel.deleteAllClips()
-                                        showingDeleteAllConfirmation = false
+                                        withAnimation(.easeInOut(duration: 0.12)) {
+                                            viewModel.deleteAllClips()
+                                            showingDeleteAllConfirmation = false
+                                        }
                                     }
                                     .buttonStyle(.plain)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 3.5)
                                     .background(Color.red)
                                     .foregroundColor(.white)
-                                    .cornerRadius(4)
+                                    .cornerRadius(5)
                                 }
                             }
-                            .padding(8)
-                            .background(Color.red.opacity(0.08))
-                            .cornerRadius(6)
+                            .padding(9)
+                            .background(Color.red.opacity(0.1))
+                            .cornerRadius(7)
                         } else {
                             Button(action: {
-                                showingDeleteAllConfirmation = true
-                                showingClearUnpinnedConfirmation = false
+                                withAnimation(.easeInOut(duration: 0.12)) {
+                                    showingDeleteAllConfirmation = true
+                                    showingClearUnpinnedConfirmation = false
+                                }
                             }) {
                                 HStack {
                                     Image(systemName: "xmark.bin")
@@ -260,12 +296,12 @@ public struct SettingsView: View {
                                         .font(.system(size: 12, weight: .medium))
                                     Spacer()
                                 }
-                                .padding(.vertical, 3)
+                                .padding(.vertical, 2)
                             }
                             .buttonStyle(.plain)
                         }
 
-                        Divider().padding(.vertical, 2)
+                        Divider().opacity(0.2).padding(.vertical, 2)
 
                         Button(action: { NSApplication.shared.terminate(nil) }) {
                             HStack {
@@ -274,17 +310,23 @@ public struct SettingsView: View {
                                 Text("Quit ClipSuite")
                                     .foregroundColor(.secondary)
                                     .font(.system(size: 12, weight: .medium))
-                                    Spacer()
+                                Spacer()
                             }
-                            .padding(.vertical, 3)
+                            .padding(.vertical, 2)
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(12)
-                    .background(Color.primary.opacity(0.03))
-                    .cornerRadius(8)
+                    .padding(13)
+                    .background {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                            }
+                    }
                 }
-                .padding(14)
+                .padding(12)
             }
         }
     }

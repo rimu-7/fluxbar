@@ -20,8 +20,22 @@ public struct PopoverRootView: View {
                 mainContentView
             }
         }
-        .frame(width: 380, height: 500)
-        .background(.ultraThinMaterial)
+        .frame(width: 390, height: 520)
+        .background {
+            // Hardware-accelerated macOS frosted glass vibrancy
+            VisualEffectView(material: .popover, blendingMode: .behindWindow, state: .active)
+                .overlay {
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.04),
+                            Color.clear,
+                            Color.black.opacity(0.12)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+        }
         .onAppear {
             PasteboardService.shared.checkForChanges()
             viewModel.refreshClips()
@@ -39,13 +53,13 @@ public struct PopoverRootView: View {
     private var mainContentView: some View {
         VStack(spacing: 0) {
             // Header Bar
-            VStack(spacing: 8) {
+            VStack(spacing: 9) {
                 HStack(spacing: 8) {
-                    // Search Field
-                    HStack(spacing: 6) {
+                    // Spotlight-Style Glass Search Bar
+                    HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.accentColor.opacity(0.9))
 
                         TextField("Search clips (FTS5)...", text: $viewModel.searchQuery)
                             .textFieldStyle(.plain)
@@ -62,42 +76,103 @@ public struct PopoverRootView: View {
                                     .foregroundColor(.secondary)
                             }
                             .buttonStyle(.plain)
+                            .transition(.scale.combined(with: .opacity))
                         }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(Color.primary.opacity(0.06))
-                    .cornerRadius(7)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background {
+                        RoundedRectangle(cornerRadius: 9)
+                            .fill(Color.white.opacity(0.06))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 9)
+                                    .strokeBorder(
+                                        LinearGradient(
+                                            colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        ),
+                                        lineWidth: 0.75
+                                    )
+                            }
+                    }
 
-                    // Pause / Resume Badge Button
+                    // Frosted Pause / Resume Button
                     Button(action: { viewModel.togglePause() }) {
                         Image(systemName: viewModel.settings.isPaused ? "pause.circle.fill" : "record.circle")
-                            .font(.system(size: 14))
+                            .font(.system(size: 13.5, weight: .medium))
                             .foregroundColor(viewModel.settings.isPaused ? .orange : .secondary)
+                            .frame(width: 30, height: 30)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(viewModel.settings.isPaused ? Color.orange.opacity(0.18) : Color.white.opacity(0.05))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .strokeBorder(viewModel.settings.isPaused ? Color.orange.opacity(0.35) : Color.white.opacity(0.1), lineWidth: 0.5)
+                                    }
+                            )
                     }
                     .buttonStyle(.plain)
                     .help(viewModel.settings.isPaused ? "Recording paused. Click to resume." : "Recording active. Click to pause.")
 
-                    // Settings Button
+                    // Frosted Settings Button
                     Button(action: { viewModel.showingSettings = true }) {
                         Image(systemName: "gearshape")
-                            .font(.system(size: 13))
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.secondary)
+                            .frame(width: 30, height: 30)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.white.opacity(0.05))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+                                    }
+                            )
                     }
                     .buttonStyle(.plain)
                     .help("Open Settings")
                 }
 
-                // Filter Bar & Clip Count
+                // Glass Segmented Capsule Switcher & Item Counter
                 HStack {
-                    Picker("", selection: $viewModel.filterMode) {
+                    HStack(spacing: 2) {
                         ForEach(FilterMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+                            Button(action: {
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                    viewModel.filterMode = mode
+                                }
+                            }) {
+                                HStack(spacing: 4) {
+                                    Text(mode.rawValue)
+                                        .font(.system(size: 11, weight: viewModel.filterMode == mode ? .semibold : .medium))
+                                }
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 4)
+                                .background {
+                                    if viewModel.filterMode == mode {
+                                        RoundedRectangle(cornerRadius: 6.5)
+                                            .fill(Color.white.opacity(0.18))
+                                            .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 1)
+                                            .overlay {
+                                                RoundedRectangle(cornerRadius: 6.5)
+                                                    .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5)
+                                            }
+                                    }
+                                }
+                                .foregroundColor(viewModel.filterMode == mode ? .primary : .secondary)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 140)
+                    .padding(2.5)
+                    .background(Color.black.opacity(0.18))
+                    .cornerRadius(8)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                    }
 
                     Spacer()
 
@@ -110,8 +185,8 @@ public struct PopoverRootView: View {
                         }
                     } else {
                         Text("\(viewModel.clips.count) items")
-                            .font(.system(size: 10.5))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundColor(.secondary.opacity(0.8))
                     }
                 }
             }
@@ -119,7 +194,7 @@ public struct PopoverRootView: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
 
-            Divider()
+            Divider().opacity(0.3)
 
             // List of Clips or Empty State
             if viewModel.clips.isEmpty {
@@ -128,7 +203,7 @@ public struct PopoverRootView: View {
                 clipsListView
             }
 
-            // Keyboard Shortcuts Footer
+            // Glass Keyboard Shortcuts Footer
             keyboardHelpFooter
         }
     }
@@ -160,8 +235,8 @@ public struct PopoverRootView: View {
                         .id(item.stableId)
                     }
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onChange(of: viewModel.selectedIndex) { newIndex in
@@ -179,8 +254,8 @@ public struct PopoverRootView: View {
         VStack(spacing: 12) {
             Spacer()
             Image(systemName: viewModel.searchQuery.isEmpty ? "doc.on.clipboard" : "magnifyingglass")
-                .font(.system(size: 36))
-                .foregroundColor(.secondary.opacity(0.4))
+                .font(.system(size: 38))
+                .foregroundColor(.secondary.opacity(0.35))
 
             Text(viewModel.searchQuery.isEmpty ? "No Clips Saved" : "No Matching Clips")
                 .font(.system(size: 13, weight: .semibold))
@@ -188,40 +263,55 @@ public struct PopoverRootView: View {
 
             Text(viewModel.searchQuery.isEmpty ? "Copy text anywhere to begin saving history." : "Try a different search query.")
                 .font(.system(size: 11))
-                .foregroundColor(.secondary.opacity(0.8))
+                .foregroundColor(.secondary.opacity(0.7))
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var keyboardHelpFooter: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 2) {
-                Text("↑↓").font(.system(size: 10, weight: .bold))
-                Text("Navigate").font(.system(size: 9.5))
-            }
-            HStack(spacing: 2) {
-                Text("↵").font(.system(size: 10, weight: .bold))
-                Text("Copy").font(.system(size: 9.5))
-            }
-            HStack(spacing: 2) {
-                Text("⌘P").font(.system(size: 10, weight: .bold))
-                Text("Pin").font(.system(size: 9.5))
-            }
-            HStack(spacing: 2) {
-                Text("⌘⌫").font(.system(size: 10, weight: .bold))
-                Text("Delete").font(.system(size: 9.5))
-            }
-            HStack(spacing: 2) {
-                Text("⌘1-9").font(.system(size: 10, weight: .bold))
-                Text("Quick").font(.system(size: 9.5))
-            }
+        HStack(spacing: 9) {
+            glassKeyLegend(keys: ["↑", "↓"], label: "Move")
+            glassKeyLegend(keys: ["↵"], label: "Copy")
+            glassKeyLegend(keys: ["⌘P"], label: "Pin")
+            glassKeyLegend(keys: ["⌘⌫"], label: "Delete")
+            glassKeyLegend(keys: ["⌘1-9"], label: "Quick")
             Spacer()
         }
-        .foregroundColor(.secondary.opacity(0.8))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.03))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            Color.black.opacity(0.14)
+                .overlay(alignment: .top) {
+                    Divider().opacity(0.3)
+                }
+        )
+    }
+
+    private func glassKeyLegend(keys: [String], label: String) -> some View {
+        HStack(spacing: 3.5) {
+            HStack(spacing: 1.5) {
+                ForEach(keys, id: \.self) { key in
+                    Text(key)
+                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.primary.opacity(0.9))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 3.5)
+                                .fill(Color.white.opacity(0.09))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 3.5)
+                                        .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
+                                }
+                                .shadow(color: Color.black.opacity(0.18), radius: 1, x: 0, y: 0.5)
+                        )
+                }
+            }
+            Text(label)
+                .font(.system(size: 9.5))
+                .foregroundColor(.secondary.opacity(0.8))
+        }
     }
 
     // MARK: - Native Keyboard Monitor
@@ -259,7 +349,6 @@ public struct PopoverRootView: View {
             }
 
             // 5. Cmd + Delete / Cmd + Backspace: ONLY delete when Cmd modifier is explicitly held
-            // Plain backspace will NEVER delete clips!
             if isCommand && (event.keyCode == 51 || event.keyCode == 117) {
                 vm.deleteSelected()
                 return nil
