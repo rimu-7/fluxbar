@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "NotchKit",
+    name: "FluxBar",
     platforms: [
         .macOS(.v13)
     ],
@@ -10,8 +10,10 @@ let package = Package(
         .library(name: "ClipCore", targets: ["ClipCore"]),
         .library(name: "NetCore", targets: ["NetCore"]),
         .library(name: "PowerCore", targets: ["PowerCore"]),
-        .executable(name: "NotchKit", targets: ["NotchKit"]),
-        .executable(name: "nkit", targets: ["nkit"]),
+        .executable(name: "FluxBar", targets: ["FluxBar"]),
+        .executable(name: "NotchKit", targets: ["FluxBar"]),
+        .executable(name: "flux", targets: ["flux"]),
+        .executable(name: "nkit", targets: ["flux"]),
         .executable(name: "clip", targets: ["clip"])
     ],
     dependencies: [
@@ -39,32 +41,32 @@ let package = Package(
             path: "Sources/PowerCore"
         ),
         .executableTarget(
-            name: "NotchKit",
+            name: "FluxBar",
             dependencies: [
                 "ClipCore",
                 "NetCore",
                 "PowerCore"
             ],
-            path: "Sources/NotchKit"
+            path: "Sources/FluxBar"
         ),
         .executableTarget(
-            name: "nkit",
+            name: "flux",
             dependencies: [
                 "ClipCore",
                 "PowerCore",
                 "NetCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
-            path: "Sources/nkit"
+            path: "Sources/flux"
         ),
         .executableTarget(
-            name: "com.notchkit.powerd",
+            name: "com.fluxbar.powerd",
             dependencies: [
                 "PowerCore"
             ],
             path: "Sources/PowerDaemon",
             resources: [
-                .copy("com.notchkit.powerd.plist")
+                .copy("com.fluxbar.powerd.plist")
             ]
         ),
         .executableTarget(

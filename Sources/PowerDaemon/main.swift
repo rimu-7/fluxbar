@@ -1,7 +1,7 @@
 import Foundation
 import PowerCore
 
-/// NotchKit Privileged Power Daemon (com.notchkit.powerd)
+/// FluxBar Privileged Power Daemon (com.fluxbar.powerd)
 /// Managed via SMAppService.daemon to perform SMC register writes with verified XPC audit tokens
 final class PowerDaemonService: NSObject {
     static let shared = PowerDaemonService()

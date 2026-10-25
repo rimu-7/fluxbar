@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.notchkit.powerd</string>
+    <string>com.fluxbar.powerd</string>
     <key>BundleProgram</key>
-    <string>Contents/MacOS/com.notchkit.powerd</string>
+    <string>Contents/MacOS/com.fluxbar.powerd</string>
     <key>MachServices</key>
     <dict>
-        <key>com.notchkit.powerd</key>
+        <key>com.fluxbar.powerd</key>
         <true/>
     </dict>
     <key>RunAtLoad</key>

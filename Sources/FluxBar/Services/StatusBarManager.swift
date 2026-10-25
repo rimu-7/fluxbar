@@ -13,7 +13,7 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
     private var speedStatusItem: NSStatusItem?
 
     private var unifiedPopover: NSPopover?
-    @Published public var selectedTab: NotchKitTab = .clipboard
+    @Published public var selectedTab: FluxBarTab = .clipboard
 
     private var cancellables = Set<AnyCancellable>()
     private var clipViewModel: ClipBarViewModel?
@@ -21,7 +21,7 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
     private var batteryViewModel: BatteryViewModel?
     private var keyMonitor: Any?
 
-    private var lastRenderedSpeedTitle: String?
+    private var lastSpeedState: FluxSpeedMenuBarRenderer.FormattedSpeedState?
 
     public func setup(
         clipViewModel: ClipBarViewModel,
@@ -67,7 +67,7 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
         clipVM.setPopoverVisible(true)
 
         // 2. Recreate the fresh SwiftUI hierarchy
-        let rootView = NotchKitMainPopoverView(
+        let rootView = FluxBarMainPopoverView(
             clipVM: clipVM,
             speedVM: speedVM,
             batteryVM: batteryVM,
@@ -105,8 +105,8 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
     private func setupClipStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            let copyImage = NSImage(systemSymbolName: "doc.on.doc.fill", accessibilityDescription: "NotchKit Clipboard")
-                ?? NSImage(systemSymbolName: "doc.on.clipboard.fill", accessibilityDescription: "NotchKit Clipboard")
+            let copyImage = NSImage(systemSymbolName: "doc.on.doc.fill", accessibilityDescription: "FluxBar Clipboard")
+                ?? NSImage(systemSymbolName: "doc.on.clipboard.fill", accessibilityDescription: "FluxBar Clipboard")
             button.image = copyImage
             button.target = self
             button.action = #selector(handleClipButtonClicked)
@@ -119,13 +119,11 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
     private func setupSpeedStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            let initialTitle = "↓ 0 B/s  ↑ 0 B/s"
-            button.title = initialTitle
-            lastRenderedSpeedTitle = initialTitle
-            button.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium)
+            button.imagePosition = .imageOnly
             button.target = self
             button.action = #selector(handleSpeedButtonClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            updateSpeedMeter(upload: 0.0, download: 0.0)
         }
         item.isVisible = speedViewModel?.isSpeedMeterEnabled ?? true
         self.speedStatusItem = item
@@ -182,20 +180,24 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
         speedVM.$currentSpeed
             .receive(on: RunLoop.main)
             .sink { [weak self] newSpeed in
-                self?.updateSpeedTitle(newSpeed.menuBarLabel)
+                self?.updateSpeedMeter(
+                    upload: Double(newSpeed.bytesOutPerSec),
+                    download: Double(newSpeed.bytesInPerSec)
+                )
             }
             .store(in: &cancellables)
     }
 
-    /// Skips NSStatusItem redraws if the speed string is unchanged.
-    /// Eliminates unnecessary WindowServer GPU wakeups and redraw overhead.
-    private func updateSpeedTitle(_ title: String) {
-        guard title != lastRenderedSpeedTitle else { return }
-        lastRenderedSpeedTitle = title
+    /// Renders the pixel-perfect 4-state speed meter image.
+    /// Skips NSStatusItem redraws if state is unchanged (eliminating redundant WindowServer GPU wakeups).
+    private func updateSpeedMeter(upload: Double, download: Double) {
+        let state = FluxSpeedMenuBarRenderer.format(uploadBytes: upload, downloadBytes: download)
+        guard state != lastSpeedState else { return }
+        lastSpeedState = state
 
         guard let button = speedStatusItem?.button else { return }
-        button.title = title
-        button.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium)
+        let image = FluxSpeedMenuBarRenderer.renderImage(for: state)
+        button.image = image
     }
 
     private func observeSettings() {

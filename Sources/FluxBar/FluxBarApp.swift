@@ -5,7 +5,7 @@ import NetCore
 import PowerCore
 
 @main
-struct NotchKitApp: App {
+struct FluxBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
@@ -31,10 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         print("=======================================================")
-        print("  🚀 NotchKit is running successfully!")
+        print("  🚀 FluxBar is running successfully!")
         print("  • Look at your macOS menu bar (top right) for:")
         print("    1. Copy icon (Clipboard History)")
-        print("    2. Speed Meter (Live Network Speeds)")
+        print("    2. Speed Meter (Live 2-line ↑/↓ Network Speeds)")
         print("  • Both icons open the unified UI (Clipboard | Battery | Speed).")
         print("  • Press Ctrl+C in this terminal to stop.")
         print("=======================================================")
@@ -45,5 +45,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PasteboardService.shared.stopMonitoring()
         NetworkSpeedMonitor.shared.stopMonitoring()
         BatteryMonitor.shared.stopMonitoring()
+        BandwidthStore.shared.flushToDisk()
     }
 }

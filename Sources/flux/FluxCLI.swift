@@ -5,17 +5,18 @@ import PowerCore
 import NetCore
 
 @main
-struct NKitCLI: ParsableCommand {
+struct FluxCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "nkit",
-        abstract: "NotchKit Unified macOS Menu Bar & Hardware Power, Network, and Clipboard CLI",
+        commandName: "flux",
+        abstract: "FluxBar Unified macOS Menu Bar & Hardware Power, Network, and Clipboard CLI",
         version: "1.1.0",
         subcommands: [
             ClipCommand.self,
             PowerCommand.self,
             NetCommand.self
         ],
-        defaultSubcommand: PowerCommand.self
+        defaultSubcommand: PowerCommand.self,
+        aliases: ["nkit"]
     )
 }
 
@@ -210,7 +211,7 @@ struct ClipStatsCommand: ParsableCommand {
         formatter.countStyle = .file
 
         print("========================================")
-        print("  NotchKit Clipboard Storage Stats")
+        print("  FluxBar Clipboard Storage Stats")
         print("========================================")
         print("Total Clips Saved:      \(stats.totalClips)")
         print("Pinned Clips:           \(stats.pinnedClips)")
@@ -265,7 +266,7 @@ struct PowerStatusCommand: ParsableCommand {
         }
 
         print("====================================================================")
-        print("  ⚡️ NotchKit Power & Battery Hardware Telemetry")
+        print("  ⚡️ FluxBar Power & Battery Hardware Telemetry")
         print("====================================================================")
         print("Battery Level:          \(telemetry.percentage)% (\(telemetry.chargingState.statusDescription))")
         print("Power Source:           \(telemetry.powerSource)")
@@ -478,7 +479,7 @@ struct NetStatsCommand: ParsableCommand {
         }
 
         print("====================================================================")
-        print("  📶 NotchKit Real-Time Network & Bandwidth Stats")
+        print("  📶 FluxBar Real-Time Network & Bandwidth Stats")
         print("====================================================================")
         print("Upload Rate (↑):        \(speed.formattedUpload)")
         print("Download Rate (↓):      \(speed.formattedDownload)")

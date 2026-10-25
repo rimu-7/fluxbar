@@ -7,7 +7,7 @@ cd "$DIR"
 SWIFT_EXEC="${SWIFT_EXEC:-/tmp/test_patch/usr/bin/swiftc}"
 SWIFT_EXEC_MANIFEST="${SWIFT_EXEC_MANIFEST:-$DIR/scripts/swiftc-manifest}"
 
-echo "==> Building NotchKit test targets..."
+echo "==> Building FluxBar test targets..."
 SWIFT_EXEC="$SWIFT_EXEC" SWIFT_EXEC_MANIFEST="$SWIFT_EXEC_MANIFEST" swift test \
   -Xswiftc -F -Xswiftc /tmp/test_patch/Frameworks \
   -Xlinker -F -Xlinker /tmp/test_patch/Frameworks \
@@ -21,6 +21,7 @@ import Foundation
 import ObjectiveC
 
 let possibleBundles = [
+    ".build/arm64-apple-macosx/debug/FluxBarPackageTests.xctest",
     ".build/arm64-apple-macosx/debug/NotchKitPackageTests.xctest",
     ".build/arm64-apple-macosx/debug/ClipSuitePackageTests.xctest"
 ]

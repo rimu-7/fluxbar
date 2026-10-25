@@ -29,14 +29,16 @@ public final class BandwidthStore: @unchecked Sendable {
             path = customPath
         } else {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let notchDir = appSupport.appendingPathComponent("NotchKit", isDirectory: true)
-            try? FileManager.default.createDirectory(at: notchDir, withIntermediateDirectories: true)
-            path = notchDir.appendingPathComponent("bandwidth.sqlite").path
+            let legacyDir = appSupport.appendingPathComponent("NotchKit", isDirectory: true)
+            let fluxDir = appSupport.appendingPathComponent("FluxBar", isDirectory: true)
+            let dir = FileManager.default.fileExists(atPath: legacyDir.appendingPathComponent("bandwidth.sqlite").path) ? legacyDir : fluxDir
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            path = dir.appendingPathComponent("bandwidth.sqlite").path
         }
 
         var config = Configuration()
         config.qos = .utility
-        config.label = "NotchKit.BandwidthStore"
+        config.label = "FluxBar.BandwidthStore"
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA journal_mode = WAL;")
             try db.execute(sql: "PRAGMA synchronous = NORMAL;")

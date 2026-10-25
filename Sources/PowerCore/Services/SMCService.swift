@@ -379,8 +379,10 @@ public final class SMCService: @unchecked Sendable {
     }
 
     /// Path where the privileged power helper is installed
-    public static let helperPath = "/Library/PrivilegedHelperTools/com.notchkit.powerd"
-    public static let fallbackHelperPath = "/usr/local/bin/notchkit-power-helper"
+    public static let helperPath = "/Library/PrivilegedHelperTools/com.fluxbar.powerd"
+    public static let fallbackHelperPath = "/usr/local/bin/fluxbar-power-helper"
+    public static let legacyHelperPath = "/Library/PrivilegedHelperTools/com.notchkit.powerd"
+    public static let legacyFallbackHelperPath = "/usr/local/bin/notchkit-power-helper"
     public static let wattbitdPath = "/Library/PrivilegedHelperTools/wattbitd"
 
     public var isHelperInstalled: Bool {
@@ -395,10 +397,14 @@ public final class SMCService: @unchecked Sendable {
         let execPath: String
         if FileManager.default.fileExists(atPath: Self.helperPath) {
             execPath = Self.helperPath
-        } else if FileManager.default.fileExists(atPath: Self.wattbitdPath) {
-            execPath = Self.wattbitdPath
         } else if FileManager.default.fileExists(atPath: Self.fallbackHelperPath) {
             execPath = Self.fallbackHelperPath
+        } else if FileManager.default.fileExists(atPath: Self.legacyHelperPath) {
+            execPath = Self.legacyHelperPath
+        } else if FileManager.default.fileExists(atPath: Self.legacyFallbackHelperPath) {
+            execPath = Self.legacyFallbackHelperPath
+        } else if FileManager.default.fileExists(atPath: Self.wattbitdPath) {
+            execPath = Self.wattbitdPath
         } else {
             return false
         }

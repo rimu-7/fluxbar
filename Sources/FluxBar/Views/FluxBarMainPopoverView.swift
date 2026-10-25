@@ -4,7 +4,7 @@ import ClipCore
 import NetCore
 import PowerCore
 
-public enum NotchKitTab: String, CaseIterable, Identifiable, Sendable {
+public enum FluxBarTab: String, CaseIterable, Identifiable, Sendable {
     case clipboard = "Clipboard"
     case battery = "Battery"
     case speedMeter = "Speed"
@@ -34,8 +34,10 @@ public enum NotchKitTab: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+public typealias NotchKitTab = FluxBarTab
+
 @MainActor
-public struct NotchKitMainPopoverView: View {
+public struct FluxBarMainPopoverView: View {
     @ObservedObject var clipVM: ClipBarViewModel
     @ObservedObject var speedVM: SpeedMeterViewModel
     @ObservedObject var batteryVM: BatteryViewModel
@@ -123,7 +125,7 @@ public struct NotchKitMainPopoverView: View {
                         .foregroundColor(.white)
                 }
 
-                Text("NotchKit")
+                Text("FluxBar")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(.primary)
             }
@@ -211,7 +213,7 @@ public struct NotchKitMainPopoverView: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("NotchKit Settings")
+            .help("FluxBar Settings")
 
             // Prominent ✕ Close Button
             Button(action: {
@@ -229,3 +231,5 @@ public struct NotchKitMainPopoverView: View {
         }
     }
 }
+
+public typealias NotchKitMainPopoverView = FluxBarMainPopoverView

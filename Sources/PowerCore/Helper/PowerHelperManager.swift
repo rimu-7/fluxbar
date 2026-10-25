@@ -5,9 +5,12 @@ import ServiceManagement
 /// Manages privileged helper installation and hardware charge limiting execution
 public enum PowerHelperManager {
     public static let wattbitdPath = "/Library/PrivilegedHelperTools/wattbitd"
-    public static let helperIdentifier = "com.notchkit.powerd"
+    public static let helperIdentifier = "com.fluxbar.powerd"
+    public static let legacyHelperIdentifier = "com.notchkit.powerd"
     public static let destinationPath = "/Library/PrivilegedHelperTools/\(helperIdentifier)"
-    public static let fallbackBinPath = "/usr/local/bin/notchkit-power-helper"
+    public static let legacyDestinationPath = "/Library/PrivilegedHelperTools/\(legacyHelperIdentifier)"
+    public static let fallbackBinPath = "/usr/local/bin/fluxbar-power-helper"
+    public static let legacyFallbackBinPath = "/usr/local/bin/notchkit-power-helper"
 
     public static var isInstalled: Bool {
         if #available(macOS 13.0, *) {
@@ -19,7 +22,10 @@ public enum PowerHelperManager {
         if FileManager.default.fileExists(atPath: wattbitdPath) {
             return true
         }
-        if FileManager.default.fileExists(atPath: destinationPath) {
+        if FileManager.default.fileExists(atPath: destinationPath) || FileManager.default.fileExists(atPath: legacyDestinationPath) {
+            return true
+        }
+        if FileManager.default.fileExists(atPath: fallbackBinPath) || FileManager.default.fileExists(atPath: legacyFallbackBinPath) {
             return true
         }
         return false
@@ -27,13 +33,16 @@ public enum PowerHelperManager {
 
     public static func findBuiltDaemonBinary() -> String? {
         let candidates = [
+            Bundle.main.bundlePath + "/Contents/MacOS/com.fluxbar.powerd",
+            Bundle.main.bundlePath + "/Contents/MacOS/fluxbar-power-helper",
+            "/usr/local/bin/com.fluxbar.powerd",
+            "/usr/local/bin/fluxbar-power-helper",
+            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("com.fluxbar.powerd").path,
+            FileManager.default.currentDirectoryPath + "/.build/debug/com.fluxbar.powerd",
+            FileManager.default.currentDirectoryPath + "/.build/release/com.fluxbar.powerd",
             Bundle.main.bundlePath + "/Contents/MacOS/com.notchkit.powerd",
-            Bundle.main.bundlePath + "/Contents/MacOS/notchkit-power-helper",
             "/usr/local/bin/com.notchkit.powerd",
-            "/usr/local/bin/notchkit-power-helper",
-            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("com.notchkit.powerd").path,
-            FileManager.default.currentDirectoryPath + "/.build/debug/com.notchkit.powerd",
-            FileManager.default.currentDirectoryPath + "/.build/release/com.notchkit.powerd"
+            FileManager.default.currentDirectoryPath + "/.build/debug/com.notchkit.powerd"
         ]
         return candidates.first(where: { FileManager.default.fileExists(atPath: $0) })
     }
@@ -65,9 +74,8 @@ public enum PowerHelperManager {
                 } catch {}
             }
 
-            // 2. Try notchkit-power-helper if available
-            let helperPath = FileManager.default.fileExists(atPath: destinationPath) ? destinationPath : fallbackBinPath
-            if FileManager.default.fileExists(atPath: helperPath) {
+            // 2. Try fluxbar-power-helper or legacy helper if available
+            if let helperPath = [destinationPath, fallbackBinPath, legacyDestinationPath, legacyFallbackBinPath].first(where: { FileManager.default.fileExists(atPath: $0) }) {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: helperPath)
                 process.arguments = ["limit", arg]

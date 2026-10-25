@@ -10,7 +10,9 @@ import CryptoKit
 public enum ThumbnailService {
     public static var thumbnailsDirectoryURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("NotchKit/Thumbnails", isDirectory: true)
+        let fluxDir = appSupport.appendingPathComponent("FluxBar/Thumbnails", isDirectory: true)
+        let legacyDir = appSupport.appendingPathComponent("NotchKit/Thumbnails", isDirectory: true)
+        let dir = FileManager.default.fileExists(atPath: legacyDir.path) ? legacyDir : fluxDir
         if !FileManager.default.fileExists(atPath: dir.path) {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [
                 .posixPermissions: 0o700

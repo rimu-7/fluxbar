@@ -15,7 +15,9 @@ public final class ClipBlobManager: @unchecked Sendable {
             self.blobsDirectoryURL = custom
         } else {
             let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            self.blobsDirectoryURL = appSupport.appendingPathComponent("NotchKit/Blobs", isDirectory: true)
+            let legacy = appSupport.appendingPathComponent("NotchKit/Blobs", isDirectory: true)
+            let flux = appSupport.appendingPathComponent("FluxBar/Blobs", isDirectory: true)
+            self.blobsDirectoryURL = fileManager.fileExists(atPath: legacy.path) ? legacy : flux
         }
         createDirectoryIfNeeded()
     }
