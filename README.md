@@ -1,209 +1,213 @@
-# ClipSuite 📎
+<div align="center">
 
-A complete, production-ready, 100% offline macOS Clipboard Manager suite built in Swift 5.10+ / Swift 6 and SwiftUI, targeting macOS 13.0+.
+<img src="Resources/AppIcon.png" width="112" alt="FluxBar icon">
 
-ClipSuite is engineered with a **zero N+1 query architecture**, offloading deduplication, history pruning, and full-text search directly to SQLite's C engine via GRDB.
+# FluxBar
 
----
+**Clipboard history, a live network speed meter and a battery charge limiter, in one tiny native menu bar app.**
 
-## 🏗 System Architecture
+[![CI](https://github.com/rimu-7/fluxbar/actions/workflows/ci.yml/badge.svg)](https://github.com/rimu-7/fluxbar/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/rimu-7/fluxbar?sort=semver)](https://github.com/rimu-7/fluxbar/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)
+![Apple Silicon & Intel](https://img.shields.io/badge/Apple%20Silicon%20%26%20Intel-supported-555)
 
-```text
-               ┌────────────────────────────────────────────────────────┐
-               │                     NSPasteboard                       │
-               └──────────────▲──────────────────────────▲──────────────┘
-                              │                          │
-                    0.4s poll │ copy item      read/pipe │ copy item
-                              │                          │
-        ┌─────────────────────▼──────┐            ┌──────▼─────────────────────┐
-        │          ClipBar           │            │            clip            │
-        │   (Native Menu Bar App)    │            │      (High-Speed CLI)      │
-        │                            │            │                            │
-        │   ValueObservation.track   │            │   Direct atomic reads/     │
-        │   (Reactive, 0 DB polling) │            │   writes in transactions   │
-        └──────────────▲─────────────┘            └──────────────▲─────────────┘
-                       │                                         │
-                       └───────────────────┬─────────────────────┘
-                                           │
-                                ┌──────────▼──────────┐
-                                │      ClipCore       │
-                                │   (Shared Engine)   │
-                                └──────────┬──────────┘
-                                           │
-                               ┌───────────▼───────────┐
-                               │     SQLite (WAL)      │
-                               │  ~/.../ClipSuite/     │
-                               │      clips.db         │
-                               └───────────────────────┘
-```
+</div>
 
-### Zero N+1 & Zero Redundant Round-Trips
+## Features
 
-1. **Atomic Upsert Deduplication (`ON CONFLICT`):**
-   - Every copied string is hashed with `CryptoKit.SHA256`.
-   - Insertions execute a single atomic SQLite statement:
-     ```sql
-     INSERT INTO clip_items (content, contentHash, charCount, lineCount, sourceAppBundleId, sourceAppName, copyCount, isPinned, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
-     ON CONFLICT(contentHash) DO UPDATE SET
-         updatedAt = excluded.updatedAt,
-         copyCount = clip_items.copyCount + 1
-     RETURNING *;
-     ```
-   - No application-side "check-then-insert" round-trips.
+### 📋 Clipboard history
 
-2. **Native Trigger-Based History Pruning (`AFTER INSERT`):**
-   - Never loops over or counts rows in Swift.
-   - An SQLite trigger automatically deletes older unpinned clips that exceed `maxHistory` configured in `app_settings`:
-     ```sql
-     CREATE TRIGGER IF NOT EXISTS prune_unpinned_history
-     AFTER INSERT ON clip_items
-     BEGIN
-         DELETE FROM clip_items
-         WHERE isPinned = 0
-           AND id NOT IN (
-               SELECT id FROM clip_items
-               WHERE isPinned = 0
-               ORDER BY updatedAt DESC
-               LIMIT (SELECT maxHistory FROM app_settings WHERE id = 1)
-           );
-     END;
-     ```
+- Instant full-text search across everything you've copied
+- Keeps rich text, images and files, not just plain text
+- Pin the clips you reuse; pinned clips are never deleted automatically
+- Skips passwords and one-time codes from password managers like 1Password, Bitwarden and KeePassXC
+- Keyboard first: arrow keys, `Return` to copy, `⌘1`–`⌘9` for quick picks
 
-3. **Sub-millisecond Full-Text Search (FTS5):**
-   - Virtual FTS5 table `clip_items_fts` indexes `content` and `sourceAppName`.
-   - Synchronized automatically via SQLite `AFTER INSERT`, `AFTER UPDATE`, and `AFTER DELETE` triggers.
-   - Fast prefix matching (`prefix='2 3'`) and ranking.
+### 📶 Network speed meter
 
-4. **Reactive Observation (`ValueObservation`):**
-   - No timer polling on SQLite.
-   - Uses GRDB's `ValueObservation.tracking` to notify SwiftUI view models only when the database file actually changes on disk (including external updates from the `clip` CLI).
+- Live upload and download speed in the menu bar
+- Today's, this month's and this session's data usage
 
-5. **Security & Privacy Filtering:**
-   - Automatically detects and ignores transient or concealed pasteboard markers used by 1Password, Bitwarden, and macOS Keychain:
-     - `org.nspasteboard.ConcealedType`
-     - `org.nspasteboard.TransientType`
-     - `org.nspasteboard.AutoGeneratedType`
-     - `com.agilebits.onepassword`
+### 🔋 Battery charge limiter
 
----
+- Holds your battery at a level you choose (e.g. 80%) to slow battery wear
+- Runs from the power adapter while holding, and pauses charging if the battery gets hot
+- Keeps working when FluxBar is closed and after restarts
 
-## 📦 Project Structure
+### ⌨️ `flux` command line
 
-```text
-ClipSuite/
-├── Package.swift
-├── Makefile
-├── Sources/
-│   ├── ClipCore/                       # Shared Engine (Zero SQL in GUI/CLI)
-│   │   ├── Models/
-│   │   │   ├── ClipItem.swift          # Core record with SHA256 & metadata
-│   │   │   └── AppSettings.swift       # Singleton settings model
-│   │   ├── Database/
-│   │   │   ├── DatabaseManager.swift   # DatabasePool, transactions, queries
-│   │   │   └── Migrations.swift        # WAL, FTS5 virtual table, triggers
-│   │   └── Services/
-│   │       └── PasteboardService.swift # Background watcher & privacy filter
-│   ├── ClipBar/                        # Native SwiftUI Menu Bar Application
-│   │   ├── ClipBarApp.swift            # MenuBarExtra entry point (.window style)
-│   │   ├── ViewModels/
-│   │   │   └── ClipBarViewModel.swift  # GRDB ValueObservation & state
-│   │   └── Views/
-│   │       ├── PopoverRootView.swift   # Glassmorphic UI & keyboard shortcuts
-│   │       ├── ClipRowView.swift       # Rich previews & hover actions
-│   │       └── SettingsView.swift      # Configuration & live DB stats
-│   └── clip/                           # Fast Terminal CLI Utility
-│       └── ClipCLI.swift               # ArgumentParser subcommands
-├── Tests/
-│   └── ClipCoreTests/
-│       └── DatabasePerformanceTests.swift # Automated verification
-└── scripts/
-    ├── run-tests.sh                    # Test execution harness
-    └── swiftc-manifest                 # Manifest compilation wrapper
-```
+- Everything above from the terminal, with `--json` output for scripts
 
----
+## Light and private
 
-## ⌨️ ClipBar Keyboard Shortcuts
+### Light on your Mac
 
-| Shortcut | Action |
-| :--- | :--- |
-| `↑` / `↓` | Navigate clips smoothly |
-| `Return` | Copy highlighted clip to clipboard |
-| `⌘ + P` | Toggle pin status on highlighted clip |
-| `Delete` / `Backspace` | Delete highlighted clip |
-| `⌘1` … `⌘9` | Quick-copy first 9 clips directly |
-| `Esc` | Clear search filter |
+About **20 MB of memory** and **well under 1% CPU** when idle. FluxBar avoids constant polling, pauses during sleep, and frees the popover's memory when you close it.
+More detail in [How it stays light](#how-it-stays-light).
 
----
+### Private by design
 
-## 💻 CLI Commands (`clip`)
+FluxBar works **fully offline**. It makes no network requests and has no analytics or telemetry. Your clipboard history never leaves your Mac, and large items are stored encrypted with a key kept in your Keychain.
+
+## Install
+
+Requires macOS 13 Ventura or newer.
+
+### Terminal (recommended)
 
 ```bash
-# List recent clips in an aligned terminal table
-clip list
-
-# Search clips with FTS5 sub-millisecond query
-clip list --search "search term"
-
-# Filter pinned clips only
-clip list --pinned
-
-# Output raw JSON for piping into jq, fzf, or scripts
-clip list --json | jq '.[0]'
-
-# Copy clip by 1-based index or database ID
-clip copy 1
-clip copy 42 --id
-
-# Add clip directly from arguments
-clip add "Important note to save"
-
-# Pipe text into clip from standard input
-cat ~/.ssh/id_ed25519.pub | clip add
-git status | clip add
-
-# Toggle pin status
-clip pin 1
-
-# Delete a specific clip
-clip delete 1
-
-# Clear all unpinned history
-clip clear --force
-
-# Inspect database stats, active settings, and disk usage
-clip stats
+curl -fsSL https://raw.githubusercontent.com/rimu-7/fluxbar/main/scripts/install.sh | bash
 ```
 
----
+This installs `FluxBar.app` into `/Applications`, adds the `flux` and `clip` commands to your PATH, and opens the app.
+Run the same command again to update.
 
-## 🚀 Building & Running
+<details>
+<summary>Installer options</summary>
 
-### Requirements
-- macOS 13.0+
-- Swift 5.10+ / Swift 6
+Pass options after `bash -s --`, for example:
 
-### Make Targets
 ```bash
-# Build both ClipBar and clip binaries
-make build
-
-# Run automated database performance & trigger tests
-make test
-
-# Launch ClipBar menu bar app
-make run-bar
-
-# Install 'clip' CLI into your PATH (/usr/local/bin or ~/.local/bin)
-make install-cli
+curl -fsSL https://raw.githubusercontent.com/rimu-7/fluxbar/main/scripts/install.sh | bash -s -- --version 1.2.0
 ```
 
-### Manual Execution
+| Option | Description |
+| :-- | :-- |
+| `--version X.Y.Z` | Install a specific release (default: latest) |
+| `--dir PATH` | Where to put FluxBar.app (default: `/Applications`, or `~/Applications`) |
+| `--bin-dir PATH` | Where to put the `flux` and `clip` commands |
+| `--no-launch` | Don't open FluxBar after installing |
+| `--uninstall` | Remove FluxBar (keeps your clipboard history) |
+| `--purge` | With `--uninstall`, also delete history and settings |
+
+</details>
+
+### Disk image
+
+Download **FluxBar.dmg** from [Releases](https://github.com/rimu-7/fluxbar/releases), open it and drag FluxBar to Applications.
+
+> [!NOTE]
+> Until releases are notarized by Apple, macOS blocks the first launch of an app downloaded in a browser.
+> Open **System Settings › Privacy & Security** and click **Open Anyway**. The terminal installer doesn't have this step.
+
+### Turn on the battery limit
+
 ```bash
-# Start ClipBar in background
-.build/debug/ClipBar &
-
-# Use CLI directly
-.build/debug/clip stats
+flux power install       # one time, asks for your password
+flux power limit 80
 ```
+
+Or open the **Battery** tab and click **Install**.
+Only an administrator can pause charging, so this installs a small background helper (`com.fluxbar.powerd`). It only wakes up when your battery level, charger or settings change.
+
+## Command line
+
+```bash
+flux power                 # battery, charger and limit status
+flux power limit 85        # hold at 85% (50–100)
+flux power limit off       # charge normally to 100%
+flux power uninstall       # remove the helper and restore normal charging
+
+flux clip list             # recent clips (-s "query" to search, --pinned, --json)
+flux clip get 42           # print clip #42
+flux clip copy 42          # put clip #42 back on the clipboard
+flux clip paste            # print the most recent clip
+
+flux net                   # current speed, today's and this month's usage
+flux net live              # stream the speed every second
+```
+
+`clip` is a shorter command just for history: `clip list`, `clip add "text"` (or `some-command | clip add`), `clip pin 1`, `clip delete 1`, `clip clear --force`, `clip stats`.
+
+Add `--help` to any command for all options.
+
+## Keyboard shortcuts
+
+In the clipboard tab:
+
+| Key | Action |
+| :-- | :-- |
+| `↑` `↓` | Move selection |
+| `Return` | Copy the selected clip |
+| `⌘P` | Pin or unpin |
+| `Delete` | Delete the selected clip |
+| `⌘1` … `⌘9` | Copy one of the first nine clips |
+| `Esc` | Clear the search, then close |
+
+## Troubleshooting
+
+<details>
+<summary><b>The battery doesn't stop at my limit</b></summary>
+
+1. Run `flux power status`. The **Helper** line should say `running`. If it says the helper isn't installed, run `flux power install`.
+2. Quit other charge-limit apps (AlDente, Battery Toolkit, `battery`, WattBit, …). Two tools controlling charging at the same time will fight each other.
+3. Turn off **System Settings › Battery › Optimized Battery Charging**, which has its own charging schedule.
+
+</details>
+
+<details>
+<summary><b><code>flux: command not found</code></b></summary>
+
+The installer prints which folder it linked the commands into. If that folder isn't in your PATH (usually `~/.local/bin`), add it to `~/.zshrc`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+</details>
+
+<details>
+<summary><b>A copied item doesn't show up</b></summary>
+
+Check that recording isn't paused: the record button at the top of the clipboard tab turns orange when paused. Items marked as passwords or one-time codes by password managers are skipped on purpose.
+
+</details>
+
+## Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rimu-7/fluxbar/main/scripts/install.sh | bash -s -- --uninstall
+```
+
+This also removes the battery helper and restores normal charging. Add `--purge` to delete your clipboard history too.
+
+## How it stays light
+
+- The popover's interface is created when you open it and thrown away when you close it.
+- The speed meter samples once a second only while it's visible (every 2 s in Low Power Mode, every 30 s in the background just to keep usage totals). It stops during sleep, and the menu bar is only redrawn when the number changes.
+- The clipboard check reads a single counter twice a second. Content is read only when something new was copied, and only in the formats FluxBar keeps.
+- Battery readings are driven by macOS power notifications, never polled.
+- Images and large rich text are stored as encrypted files outside the database, and cleaned up when their clip is deleted.
+
+## Data locations
+
+| What | Where |
+| :-- | :-- |
+| Clipboard history | `~/Library/Application Support/ClipSuite/clips.db` |
+| Images, attachments, data usage | `~/Library/Application Support/FluxBar/` |
+| Battery limit settings | `/Library/Application Support/FluxBar/charge-limit.json` |
+| Battery helper | `/Library/PrivilegedHelperTools/com.fluxbar.powerd` and `/Library/LaunchDaemons/com.fluxbar.powerd.plist` |
+
+## Contributing
+
+Contributions are welcome, from bug reports and ideas to docs and code. 🙌
+
+- Found a bug or have an idea? [Open an issue](https://github.com/rimu-7/fluxbar/issues/new/choose).
+- Want to write code? Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, project layout and guidelines.
+  Issues labeled [good first issue](https://github.com/rimu-7/fluxbar/labels/good%20first%20issue) are a nice place to start.
+
+Quick start:
+
+```bash
+git clone https://github.com/rimu-7/fluxbar.git && cd fluxbar
+make test     # run the tests
+make run      # run the app from the terminal
+make app      # build dist/FluxBar.app, FluxBar.zip and FluxBar.dmg
+```
+
+If FluxBar is useful to you, a ⭐ on GitHub helps others find it.
+
+## License
+
+[MIT](LICENSE)

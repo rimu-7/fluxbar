@@ -1,0 +1,37 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Clipboard, Speed meter, Battery limit, CLI, Install / update, Other]
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: FluxBar and macOS version
+      description: "Run: flux --version && sw_vers -productVersion"
+      placeholder: "1.2.0 on macOS 15.1"
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model
+      placeholder: "MacBook Air M2"
+  - type: textarea
+    id: details
+    attributes:
+      label: Logs or output
+      description: "For battery issues, include the output of: flux power status"
+      render: shell
