@@ -139,7 +139,8 @@ let powerMethods = [
     ("testActuatorCalledOnlyOnChangeAndRetriedOnFailure", "testActuatorCalledOnlyOnChangeAndRetriedOnFailureAndReturnError:"),
     ("testBelowLimitNeverPausesCharging", "testBelowLimitNeverPausesChargingAndReturnError:"),
     ("testThermalPauseResumesWhenCool", "testThermalPauseResumesWhenCoolAndReturnError:"),
-    ("testChargeLimitConfigRoundTripAndClamping", "testChargeLimitConfigRoundTripAndClampingAndReturnError:")
+    ("testChargeLimitConfigRoundTripAndClamping", "testChargeLimitConfigRoundTripAndClampingAndReturnError:"),
+    ("testNativeLimitRoundsToSupportedValues", "testNativeLimitRoundsToSupportedValuesAndReturnError:")
 ]
 
 let startTotal = Date()

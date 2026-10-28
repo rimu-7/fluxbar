@@ -32,8 +32,8 @@
 ### 🔋 Battery charge limiter
 
 - Holds your battery at a level you choose (e.g. 80%) to slow battery wear
-- Runs from the power adapter while holding, and pauses charging if the battery gets hot
-- Keeps working when FluxBar is closed and after restarts
+- Uses the macOS charge limit on macOS 27, so there's nothing extra to install
+- Keeps working when FluxBar is closed, during sleep and after restarts
 
 ### ⌨️ `flux` command line
 
@@ -94,20 +94,25 @@ Download **FluxBar.dmg** from [Releases](https://github.com/rimu-7/fluxbar/relea
 ### Turn on the battery limit
 
 ```bash
-flux power install       # one time, asks for your password
 flux power limit 80
 ```
 
-Or open the **Battery** tab and click **Install**.
-Only an administrator can pause charging, so this installs a small background helper (`com.fluxbar.powerd`). It only wakes up when your battery level, charger or settings change.
+Or use the slider in the **Battery** tab. What happens next depends on your macOS version:
+
+| macOS | How the limit works | Limits |
+| :-- | :-- | :-- |
+| **27**, or 26.7 / 15.8 and later | FluxBar sets the macOS charge limit (the same one in **System Settings › Battery › Charge Limit**). No helper, no password. | 80, 85, 90, 95 or 100% |
+| Older versions | FluxBar installs a small background helper (`com.fluxbar.powerd`) once, which asks for your password. It only wakes up when your battery level, charger or settings change. | 50–100% |
+
+Apple locked the low-level charging controls in macOS 27, so on that version **every** charge-limit app is limited to what macOS allows.
 
 ## Command line
 
 ```bash
 flux power                 # battery, charger and limit status
-flux power limit 85        # hold at 85% (50–100)
+flux power limit 85        # hold at 85% (80–100 on macOS 27, 50–100 before)
 flux power limit off       # charge normally to 100%
-flux power uninstall       # remove the helper and restore normal charging
+flux power uninstall       # remove the helper (older macOS) and restore normal charging
 
 flux clip list             # recent clips (-s "query" to search, --pinned, --json)
 flux clip get 42           # print clip #42
@@ -140,9 +145,12 @@ In the clipboard tab:
 <details>
 <summary><b>The battery doesn't stop at my limit</b></summary>
 
-1. Run `flux power status`. The **Helper** line should say `running`. If it says the helper isn't installed, run `flux power install`.
-2. Quit other charge-limit apps (AlDente, Battery Toolkit, `battery`, WattBit, …). Two tools controlling charging at the same time will fight each other.
-3. Turn off **System Settings › Battery › Optimized Battery Charging**, which has its own charging schedule.
+1. Run `flux power status` and check the **Charge limit** line.
+   - On macOS 27 it should say `80% · macOS charge limit`. If it says `off`, run `flux power limit 80`.
+   - On older macOS the **Helper** line should say `running`. If the helper isn't installed, run `flux power limit 80`.
+2. On macOS 27, close System Settings before changing the limit from FluxBar. An open Battery settings window can save its old value back when you click **Done**.
+3. Quit other charge-limit apps (AlDente, Battery Toolkit, `battery`, WattBit, …). Two tools controlling charging at the same time will fight each other.
+4. macOS may let the battery go a few percent above or below the limit. That's normal.
 
 </details>
 
@@ -177,7 +185,7 @@ This also removes the battery helper and restores normal charging. Add `--purge`
 - The popover's interface is created when you open it and thrown away when you close it.
 - The speed meter samples once a second only while it's visible (every 2 s in Low Power Mode, every 30 s in the background just to keep usage totals). It stops during sleep, and the menu bar is only redrawn when the number changes.
 - The clipboard check reads a single counter twice a second. Content is read only when something new was copied, and only in the formats FluxBar keeps.
-- Battery readings are driven by macOS power notifications, never polled.
+- Battery readings are driven by macOS power notifications, never polled. On macOS 27 the charge limit runs entirely inside macOS, so FluxBar has no background helper at all.
 - Images and large rich text are stored as encrypted files outside the database, and cleaned up when their clip is deleted.
 
 ## Data locations
@@ -186,8 +194,9 @@ This also removes the battery helper and restores normal charging. Add `--purge`
 | :-- | :-- |
 | Clipboard history | `~/Library/Application Support/ClipSuite/clips.db` |
 | Images, attachments, data usage | `~/Library/Application Support/FluxBar/` |
-| Battery limit settings | `/Library/Application Support/FluxBar/charge-limit.json` |
-| Battery helper | `/Library/PrivilegedHelperTools/com.fluxbar.powerd` and `/Library/LaunchDaemons/com.fluxbar.powerd.plist` |
+| Battery limit (macOS 27) | Stored by macOS, shown in **System Settings › Battery** |
+| Battery limit settings (older macOS) | `/Library/Application Support/FluxBar/charge-limit.json` |
+| Battery helper (older macOS) | `/Library/PrivilegedHelperTools/com.fluxbar.powerd` and `/Library/LaunchDaemons/com.fluxbar.powerd.plist` |
 
 ## Contributing
 

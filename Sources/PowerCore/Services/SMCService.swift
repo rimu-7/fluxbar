@@ -295,12 +295,15 @@ public final class SMCService: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if let cached = cachedGeneration { return cached }
+        // macOS 27 (and the 15.8 / 26.7 updates) removed these keys or left zero-size placeholders
+        // that can't be written. Only count keys that hold data.
+        func usable(_ key: String) -> Bool { (getKeyInfo(key)?.dataSize ?? 0) > 0 }
         let gen: SMCHardwareGeneration
-        if getKeyInfo("CHTE") != nil {
+        if usable("CHTE") {
             gen = .appleSiliconM2M3M4
-        } else if getKeyInfo("CH0B") != nil {
+        } else if usable("CH0B") {
             gen = .appleSiliconM1
-        } else if getKeyInfo("BCLM") != nil {
+        } else if usable("BCLM") {
             gen = .intelBCLM
         } else {
             gen = .unsupported

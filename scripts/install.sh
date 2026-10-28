@@ -172,6 +172,5 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
 fi
 echo
 echo "Next steps:"
-echo "  flux power install     # one-time: enable the battery charge limit"
-echo "  flux power limit 80    # hold charge at 80%"
+echo "  flux power limit 80    # hold the battery at 80%"
 echo "  flux clip list         # recent clipboard history"

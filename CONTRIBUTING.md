@@ -37,7 +37,7 @@ make install  # builds FluxBar.app and installs it like the curl installer
 | `Sources/flux`, `Sources/clip` | Command line tools |
 | `Sources/ClipCore` | Clipboard database (SQLite via GRDB, FTS5 search) and the pasteboard watcher |
 | `Sources/NetCore` | Network sampling and data usage |
-| `Sources/PowerCore` | Battery readings, SMC access, charge limit logic |
+| `Sources/PowerCore` | Battery readings, SMC access, charge limit logic, macOS charge limit bridge |
 | `Sources/PowerDaemon` | `com.fluxbar.powerd`, the root helper that enforces the charge limit |
 | `scripts/` | App build, installer, icon generator |
 

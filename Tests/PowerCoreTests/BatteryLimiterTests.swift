@@ -250,4 +250,16 @@ public final class BatteryLimiterTests: XCTestCase {
         XCTAssertEqual(clamped?.limit, 50)
         XCTAssertEqual(clamped?.hysteresis, 10)
     }
+
+    public func testNativeLimitRoundsToSupportedValues() throws {
+        let limits = [80, 85, 90, 95, 100]
+        XCTAssertEqual(NativeChargeLimit.nearestSupported(50, in: limits), 80)
+        XCTAssertEqual(NativeChargeLimit.nearestSupported(77, in: limits), 80)
+        XCTAssertEqual(NativeChargeLimit.nearestSupported(82, in: limits), 80)
+        XCTAssertEqual(NativeChargeLimit.nearestSupported(83, in: limits), 85)
+        XCTAssertEqual(NativeChargeLimit.nearestSupported(90, in: limits), 90)
+        XCTAssertEqual(NativeChargeLimit.nearestSupported(100, in: limits), 100)
+        XCTAssertEqual(ChargeLimitMethod.macOS.minimumLimit, 80)
+        XCTAssertEqual(ChargeLimitMethod.helper.minimumLimit, 50)
+    }
 }

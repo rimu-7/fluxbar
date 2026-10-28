@@ -692,7 +692,9 @@ public struct BatteryPopoverView: View {
                     }
 
                     Text(batteryVM.isLimiterEnabled
-                         ? "Direct adapter bypass engages at \(batteryVM.chargeLimit)%"
+                         ? (batteryVM.method == .macOS
+                            ? "macOS holds the charge at \(batteryVM.chargeLimit)%"
+                            : "Direct adapter bypass engages at \(batteryVM.chargeLimit)%")
                          : "Limiter inactive — charging up to 100%")
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundColor(.primary)
@@ -762,13 +764,13 @@ public struct BatteryPopoverView: View {
 
                     // Range Chart Legend Labels
                     HStack {
-                        Text("50% (Storage)")
+                        Text("\(batteryVM.minimumLimit)%")
                             .font(.system(size: 9.5))
                             .foregroundColor(.secondary)
                         Spacer()
                         HStack(spacing: 4) {
                             Circle().fill(Color.orange).frame(width: 5, height: 5)
-                            Text("Limit: \(batteryVM.chargeLimit)% [Bypass]")
+                            Text("Limit: \(batteryVM.chargeLimit)%")
                                 .font(.system(size: 9.5, weight: .bold))
                                 .foregroundColor(.orange)
                         }
@@ -784,7 +786,7 @@ public struct BatteryPopoverView: View {
                             get: { Double(batteryVM.chargeLimit) },
                             set: { batteryVM.setChargeLimit(Int($0)) }
                         ),
-                        in: 50...100,
+                        in: Double(batteryVM.minimumLimit)...100,
                         step: 5
                     )
                     .tint(.orange)
@@ -1239,7 +1241,62 @@ public struct BatteryPopoverView: View {
 
     // MARK: - 7. Kernel SMC Control & Touch ID Authorization
 
+    @ViewBuilder
     private var kernelSMCAuthorizationCard: some View {
+        if batteryVM.method == .macOS {
+            nativeLimitCard
+        } else {
+            helperCard
+        }
+    }
+
+    /// macOS 27+: the limit is macOS's own, no helper involved.
+    private var nativeLimitCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(Color.green)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Using the macOS Charge Limit")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Text("No helper needed. macOS enforces the limit, even during sleep and when FluxBar is closed. It's the same setting as System Settings › Battery.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                if batteryVM.isHelperInstalled {
+                    Button("Remove Old Helper") { batteryVM.uninstallHelper() }
+                        .controlSize(.small)
+                        .disabled(batteryVM.isAuthorizingHelper)
+                        .help("The FluxBar battery helper isn't used on this Mac")
+                }
+            }
+
+            if let message = batteryVM.statusMessage {
+                Text(message)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color.white.opacity(0.035))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(Color.green.opacity(0.2), lineWidth: 0.5)
+                }
+        )
+    }
+
+    private var helperCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: batteryVM.isHelperInstalled ? "checkmark.shield.fill" : "lock.shield")
@@ -1354,9 +1411,11 @@ public struct BatteryPopoverView: View {
 
     private var powerBehaviorDescription: String {
         if batteryVM.isBypassActive {
-            return "Charging is paused at \(batteryVM.chargeLimit)%. Your Mac draws 100% of its operating power directly from the wall adapter, eliminating battery cell wear."
+            return "Charging is paused at \(batteryVM.chargeLimit)%. Your Mac runs from the power adapter, which slows battery wear."
         } else if batteryVM.telemetry.isCharging {
-            return "Replenishing battery cells up to \(batteryVM.chargeLimit)%. Hardware adapter bypass will engage automatically once the threshold is reached."
+            return batteryVM.isLimiterEnabled
+                ? "Charging up to \(batteryVM.chargeLimit)%. Charging pauses automatically once the limit is reached."
+                : "Charging to 100%."
         } else if batteryVM.telemetry.isPluggedIn {
             return "Connected to AC adapter. Battery is at normal capacity."
         } else {

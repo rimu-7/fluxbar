@@ -150,11 +150,13 @@ final class Daemon {
     }
 
     func writeStatus() {
+        let supported = smc.detectedHardwareGeneration != .unsupported
         let status = PowerDaemonStatus(
-            isChargingInhibited: limiter.isAdapterBypassActive,
-            reason: limiter.lastReason,
+            isChargingInhibited: supported && limiter.isAdapterBypassActive,
+            // Don't claim to hold the charge when we can't control it.
+            reason: supported ? limiter.lastReason : "Not needed on this Mac (macOS charge limit is used instead)",
             hardware: smc.detectedHardwareGeneration.rawValue,
-            smcWritable: smc.detectedHardwareGeneration != .unsupported
+            smcWritable: supported
         )
         // Only touch the disk when something visible changed.
         if let last = lastStatus,
