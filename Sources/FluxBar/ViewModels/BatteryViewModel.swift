@@ -4,6 +4,8 @@ import Combine
 import PowerCore
 import ClipCore
 
+/// Battery tab state. The app never writes the SMC itself: it saves the desired limit and the
+/// root helper (`com.fluxbar.powerd`) enforces it, even while FluxBar is quit.
 @MainActor
 public final class BatteryViewModel: ObservableObject {
     public static let shared = BatteryViewModel()
@@ -11,145 +13,172 @@ public final class BatteryViewModel: ObservableObject {
     @Published public var telemetry: BatteryTelemetry
     @Published public var chargeLimit: Int
     @Published public var isLimiterEnabled: Bool
-    @Published public var isBypassActive: Bool
+    @Published public var isBypassActive: Bool = false
     @Published public var isHelperInstalled: Bool
     @Published public var isAuthorizingHelper: Bool = false
     @Published public var statusMessage: String?
 
     public let availablePresets = PowerSettings.availablePresets
 
-    private let limiter: ChargeLimiter
     private let monitor: BatteryMonitor
-    private let smcService: SMCService
     private var cancellables = Set<AnyCancellable>()
+    private var pendingSave: Task<Void, Never>?
+    private var hysteresis: Int = ChargeLimitConfig.default.hysteresis
 
-    public init(
-        limiter: ChargeLimiter = .shared,
-        monitor: BatteryMonitor = .shared,
-        smcService: SMCService = .shared
-    ) {
-        self.limiter = limiter
+    public init(monitor: BatteryMonitor = .shared) {
         self.monitor = monitor
-        self.smcService = smcService
+        self.telemetry = monitor.currentTelemetry
+        self.isHelperInstalled = PowerHelperManager.isInstalled
 
-        let initialTelemetry = monitor.currentTelemetry
-        self.telemetry = initialTelemetry
-        let initialLimit = ClipBarViewModel.shared.settings.batteryChargeLimit > 0 ? ClipBarViewModel.shared.settings.batteryChargeLimit : limiter.chargeLimit
-        self.chargeLimit = initialLimit
-        self.isLimiterEnabled = ClipBarViewModel.shared.settings.isBatteryLimiterEnabled
-        self.isBypassActive = limiter.isAdapterBypassActive
-        self.isHelperInstalled = smcService.isHelperInstalled
-
-        limiter.configure(isEnabled: self.isLimiterEnabled, limit: self.chargeLimit)
+        if PowerHelperManager.isInstalled, let config = ChargeLimitConfig.load() {
+            // The helper's settings are the source of truth (they may have been changed from the CLI).
+            self.chargeLimit = config.limit
+            self.isLimiterEnabled = config.isEnabled
+            self.hysteresis = config.hysteresis
+        } else {
+            let settings = ClipBarViewModel.shared.settings
+            self.chargeLimit = ChargeLimitConfig.clampLimit(settings.batteryChargeLimit > 0 ? settings.batteryChargeLimit : 80)
+            self.isLimiterEnabled = settings.isBatteryLimiterEnabled
+        }
 
         setupSubscriptions()
         monitor.startMonitoring()
+        updateBypassState()
     }
 
     private func setupSubscriptions() {
-        // Observe live telemetry
         monitor.telemetryPublisher
             .receive(on: RunLoop.main)
             .sink { [weak self] newTelemetry in
-                guard let self = self else { return }
-                self.telemetry = newTelemetry
-                self.isBypassActive = self.limiter.isAdapterBypassActive || (newTelemetry.isPluggedIn && !newTelemetry.isCharging && newTelemetry.percentage >= self.chargeLimit)
+                guard let self else { return }
+                if self.telemetry != newTelemetry { self.telemetry = newTelemetry }
+                self.updateBypassState()
             }
             .store(in: &cancellables)
 
-        // Observe limiter state changes
-        NotificationCenter.default.publisher(for: .batteryChargeLimiterStateDidChange)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let self = self else { return }
-                self.isBypassActive = self.limiter.isAdapterBypassActive
-                self.isHelperInstalled = self.smcService.isHelperInstalled
-            }
-            .store(in: &cancellables)
-
-        // Observe limit reached notifications
-        NotificationCenter.default.publisher(for: .batteryChargeLimitReached)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] notif in
-                guard let self = self else { return }
-                let limit = notif.userInfo?["limit"] as? Int ?? self.chargeLimit
-                self.statusMessage = "Limit reached (\(limit)%). Running directly from Power Adapter."
-            }
-            .store(in: &cancellables)
-
-        // Sync with ClipBarViewModel settings
+        // Keep in sync with the toggle in Settings.
         ClipBarViewModel.shared.$settings
+            .dropFirst()
             .receive(on: RunLoop.main)
-            .sink { [weak self] newSettings in
-                guard let self = self else { return }
-                if self.chargeLimit != newSettings.batteryChargeLimit {
-                    self.chargeLimit = newSettings.batteryChargeLimit
-                    self.limiter.setChargeLimit(newSettings.batteryChargeLimit)
-                }
-                if self.isLimiterEnabled != newSettings.isBatteryLimiterEnabled {
-                    self.isLimiterEnabled = newSettings.isBatteryLimiterEnabled
-                    self.limiter.setEnabled(newSettings.isBatteryLimiterEnabled)
+            .sink { [weak self] settings in
+                guard let self else { return }
+                let limit = ChargeLimitConfig.clampLimit(settings.batteryChargeLimit)
+                if settings.isBatteryLimiterEnabled != self.isLimiterEnabled || limit != self.chargeLimit {
+                    self.isLimiterEnabled = settings.isBatteryLimiterEnabled
+                    self.chargeLimit = limit
+                    self.scheduleSave(persistToSettings: false)
                 }
             }
             .store(in: &cancellables)
+    }
+
+    private func updateBypassState() {
+        let held: Bool
+        if isHelperInstalled, let status = PowerHelperManager.daemonStatus() {
+            held = status.isChargingInhibited && telemetry.isPluggedIn
+        } else {
+            held = isLimiterEnabled && telemetry.isPluggedIn && !telemetry.isCharging
+                && telemetry.percentage >= chargeLimit - hysteresis
+        }
+        if held != isBypassActive { isBypassActive = held }
     }
 
     // MARK: - Actions
 
     public func setChargeLimit(_ newLimit: Int) {
-        let clamped = max(50, min(100, newLimit))
-        self.chargeLimit = clamped
-        limiter.setChargeLimit(clamped)
-        _ = PowerHelperManager.applyChargeLimit(clamped)
-
-        // Persist to AppSettings
-        var currentSettings = ClipBarViewModel.shared.settings
-        currentSettings.batteryChargeLimit = clamped
-        ClipBarViewModel.shared.updateSettings(currentSettings)
+        let clamped = ChargeLimitConfig.clampLimit(newLimit)
+        guard clamped != chargeLimit else { return }
+        chargeLimit = clamped
+        scheduleSave(persistToSettings: true)
     }
 
     public func setLimiterEnabled(_ enabled: Bool) {
-        self.isLimiterEnabled = enabled
-        limiter.setEnabled(enabled)
-        _ = PowerHelperManager.applyChargeLimit(enabled ? chargeLimit : 100)
+        guard enabled != isLimiterEnabled else { return }
+        isLimiterEnabled = enabled
+        scheduleSave(persistToSettings: true)
+    }
 
-        // Persist to AppSettings
-        var currentSettings = ClipBarViewModel.shared.settings
-        currentSettings.isBatteryLimiterEnabled = enabled
-        ClipBarViewModel.shared.updateSettings(currentSettings)
+    /// Debounced so dragging the slider writes once, not 50 times.
+    private func scheduleSave(persistToSettings: Bool) {
+        pendingSave?.cancel()
+        pendingSave = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.save(persistToSettings: persistToSettings)
+        }
+    }
+
+    private func save(persistToSettings: Bool) {
+        let config = ChargeLimitConfig(isEnabled: isLimiterEnabled, limit: chargeLimit, hysteresis: hysteresis)
+
+        if persistToSettings {
+            var settings = ClipBarViewModel.shared.settings
+            if settings.batteryChargeLimit != config.limit || settings.isBatteryLimiterEnabled != config.isEnabled {
+                settings.batteryChargeLimit = config.limit
+                settings.isBatteryLimiterEnabled = config.isEnabled
+                ClipBarViewModel.shared.updateSettings(settings)
+            }
+        }
+
+        isHelperInstalled = PowerHelperManager.isInstalled
+        guard isHelperInstalled else {
+            statusMessage = "Install the battery helper to enforce this limit."
+            return
+        }
+        do {
+            try PowerHelperManager.save(config)
+            statusMessage = config.isEnabled && config.limit < 100
+                ? "Charging will hold at \(config.limit)%."
+                : "Limiter off. Charging normally to 100%."
+            // The helper reacts within a second; refresh shortly after to show its decision.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.refresh() }
+        } catch {
+            statusMessage = "Couldn't save the limit: \(error.localizedDescription)"
+        }
     }
 
     public func refresh() {
         monitor.refresh()
-        self.isHelperInstalled = smcService.isHelperInstalled
+        isHelperInstalled = PowerHelperManager.isInstalled
+        updateBypassState()
     }
 
-    /// Controls deep AppleSmartBattery telemetry polling: stops IORegistry queries when popover is closed
+    /// Deep battery details are only read while the popover is open.
     public func setPopoverVisible(_ visible: Bool) {
         monitor.setPopoverVisible(visible)
-        if visible {
-            refresh()
-        }
+        if visible { refresh() }
     }
 
     public func authorizeHelper() {
         guard !isAuthorizingHelper else { return }
         isAuthorizingHelper = true
-        statusMessage = "Requesting administrator authorization..."
+        statusMessage = "Waiting for administrator approval…"
+        let config = ChargeLimitConfig(isEnabled: isLimiterEnabled, limit: chargeLimit, hysteresis: hysteresis)
 
-        Task {
-            let success = await PowerHelperManager.requestHelperInstallation()
-            await MainActor.run {
-                self.isAuthorizingHelper = false
-                self.isHelperInstalled = self.smcService.isHelperInstalled || success
-                if success {
-                    self.statusMessage = "Hardware SMC control authorized successfully!"
-                    _ = PowerHelperManager.applyChargeLimit(self.chargeLimit)
-                    self.limiter.evaluateCurrentState(telemetry: self.telemetry)
-                } else {
-                    self.statusMessage = "Authorization was cancelled or failed."
-                }
+        Task { @MainActor in
+            do {
+                try await PowerHelperManager.installWithAdminPrompt(config: config)
+                statusMessage = "Battery helper installed. Limit is now enforced, even when FluxBar is closed."
+            } catch {
+                statusMessage = error.localizedDescription
             }
+            isAuthorizingHelper = false
+            refresh()
+        }
+    }
+
+    public func uninstallHelper() {
+        guard !isAuthorizingHelper else { return }
+        isAuthorizingHelper = true
+        Task { @MainActor in
+            do {
+                try await PowerHelperManager.uninstallWithAdminPrompt()
+                statusMessage = "Battery helper removed. Normal charging restored."
+            } catch {
+                statusMessage = error.localizedDescription
+            }
+            isAuthorizingHelper = false
+            refresh()
         }
     }
 }

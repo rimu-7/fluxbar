@@ -5,7 +5,6 @@ import ClipCore
 public struct PopoverRootView: View {
     @ObservedObject public var viewModel: ClipBarViewModel
     @State private var keyMonitor: Any?
-    private let refreshTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     public init(viewModel: ClipBarViewModel) {
         self.viewModel = viewModel
@@ -24,9 +23,6 @@ public struct PopoverRootView: View {
             PasteboardService.shared.checkForChanges()
             viewModel.refreshClips()
             setupKeyboardMonitor()
-        }
-        .onReceive(refreshTimer) { _ in
-            PasteboardService.shared.checkForChanges()
         }
         .onDisappear {
             removeKeyboardMonitor()

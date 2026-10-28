@@ -195,4 +195,59 @@ public final class BatteryLimiterTests: XCTestCase {
         let magSafeKey = SMCService.fourCharCode("ACLC")
         XCTAssertEqual(SMCService.codeToString(magSafeKey), "ACLC")
     }
+
+    public func testActuatorCalledOnlyOnChangeAndRetriedOnFailure() throws {
+        var calls: [Bool] = []
+        var accept = false
+        let limiter = ChargeLimiter(isLimiterEnabled: true, chargeLimit: 80, hysteresis: 3) { inhibit, _ in
+            calls.append(inhibit)
+            return accept
+        }
+        let atLimit = BatteryTelemetry(percentage: 80, isCharging: true, isPluggedIn: true, chargingState: .charging, isBypassed: false)
+
+        // Write refused (not root): state must not flip, so the next event retries.
+        limiter.evaluateCurrentState(telemetry: atLimit)
+        XCTAssertFalse(limiter.isAdapterBypassActive)
+        accept = true
+        limiter.evaluateCurrentState(telemetry: atLimit)
+        XCTAssertTrue(limiter.isAdapterBypassActive)
+        // Same decision again: no extra hardware write.
+        limiter.evaluateCurrentState(telemetry: atLimit)
+        XCTAssertEqual(calls, [true, true])
+        // Reassert (after wake) writes even without a change.
+        limiter.evaluateCurrentState(telemetry: atLimit, reassert: true)
+        XCTAssertEqual(calls, [true, true, true])
+    }
+
+    public func testBelowLimitNeverPausesCharging() throws {
+        let limiter = ChargeLimiter(isLimiterEnabled: true, chargeLimit: 80, hysteresis: 3)
+        let low = BatteryTelemetry(percentage: 30, isCharging: true, isPluggedIn: true, chargingState: .charging, isBypassed: false)
+        limiter.evaluateCurrentState(telemetry: low, reassert: true)
+        XCTAssertFalse(limiter.isAdapterBypassActive, "A limit of 80% must not stop charging at 30%")
+    }
+
+    public func testThermalPauseResumesWhenCool() throws {
+        let limiter = ChargeLimiter(isLimiterEnabled: true, chargeLimit: 80, hysteresis: 3)
+        func t(_ temp: Double) -> BatteryTelemetry {
+            BatteryTelemetry(percentage: 60, isCharging: true, isPluggedIn: true, temperature: temp, chargingState: .charging, isBypassed: false)
+        }
+        limiter.evaluateCurrentState(telemetry: t(41))
+        XCTAssertTrue(limiter.isAdapterBypassActive)
+        limiter.evaluateCurrentState(telemetry: t(38.5))
+        XCTAssertTrue(limiter.isAdapterBypassActive, "Stays paused until it cools below the resume point")
+        limiter.evaluateCurrentState(telemetry: t(36))
+        XCTAssertFalse(limiter.isAdapterBypassActive)
+    }
+
+    public func testChargeLimitConfigRoundTripAndClamping() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("fluxbar-config-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try ChargeLimitConfig(isEnabled: true, limit: 85, hysteresis: 4).save(to: url)
+        XCTAssertEqual(ChargeLimitConfig.load(from: url), ChargeLimitConfig(isEnabled: true, limit: 85, hysteresis: 4))
+
+        try Data(#"{"isEnabled":true,"limit":12,"hysteresis":99}"#.utf8).write(to: url)
+        let clamped = ChargeLimitConfig.load(from: url)
+        XCTAssertEqual(clamped?.limit, 50)
+        XCTAssertEqual(clamped?.hysteresis, 10)
+    }
 }

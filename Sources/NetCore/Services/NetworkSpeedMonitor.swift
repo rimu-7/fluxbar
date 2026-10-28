@@ -38,7 +38,7 @@ public final class NetworkSpeedMonitor: ObservableObject, @unchecked Sendable {
 
         setupPathMonitoring()
         setupScreenSleepObservers()
-        startSamplingTimer()
+        applySamplingInterval()
     }
 
     deinit {
@@ -46,24 +46,63 @@ public final class NetworkSpeedMonitor: ObservableObject, @unchecked Sendable {
     }
 
     private func setupScreenSleepObservers() {
-        let sleepObs = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.screensDidSleepNotification,
-            object: nil,
-            queue: nil
-        ) { [weak self] _ in
-            self?.timer?.cancel()
-            self?.timer = nil
-        }
+        let center = NSWorkspace.shared.notificationCenter
+        let pause: (Notification) -> Void = { [weak self] _ in self?.pauseSampling() }
+        let resume: (Notification) -> Void = { [weak self] _ in self?.applySamplingInterval() }
+        sleepObservers = [
+            center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil, using: pause),
+            center.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: nil, using: pause),
+            center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil, using: resume),
+            center.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: nil, using: resume),
+            NotificationCenter.default.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: nil, using: resume)
+        ]
+    }
 
-        let wakeObs = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.screensDidWakeNotification,
-            object: nil,
-            queue: nil
-        ) { [weak self] _ in
-            self?.startSamplingTimer()
-        }
+    // MARK: - Adaptive sampling
 
-        sleepObservers = [sleepObs, wakeObs]
+    /// Menu bar meter shown: sample every second so the numbers feel live.
+    private var isMeterVisible = true
+    /// Speed tab open: also publish usage totals.
+    private var isDetailVisible = false
+    private var currentInterval: TimeInterval = 0
+
+    /// Call when the menu bar speed meter is shown or hidden.
+    public func setMeterVisible(_ visible: Bool) {
+        lock.lock(); isMeterVisible = visible; lock.unlock()
+        applySamplingInterval()
+    }
+
+    /// Call when the Speed tab opens or closes.
+    public func setDetailVisible(_ visible: Bool) {
+        lock.lock(); isDetailVisible = visible; lock.unlock()
+        if visible { publishUsage() }
+        applySamplingInterval()
+    }
+
+    /// 1 s when someone is looking, 2 s in Low Power Mode, 30 s in the background (usage totals only).
+    private func applySamplingInterval() {
+        lock.lock()
+        let live = isMeterVisible || isDetailVisible
+        lock.unlock()
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        let interval: TimeInterval = live ? (lowPower ? 2.0 : 1.0) : 30.0
+        samplerQueue.async { [weak self] in
+            guard let self else { return }
+            if self.timer != nil && self.currentInterval == interval { return }
+            self.startSamplingTimer(interval: interval)
+        }
+    }
+
+    private func pauseSampling() {
+        samplerQueue.async { [weak self] in
+            guard let self else { return }
+            self.timer?.cancel()
+            self.timer = nil
+            self.currentInterval = 0
+            // Baseline is kept: the first sample after wake counts bytes moved meanwhile (e.g. a
+            // download running with the screen off), averaged over the gap so there is no speed spike.
+            self.bandwidthStore.flushToDisk()
+        }
     }
 
     private func setupPathMonitoring() {
@@ -100,37 +139,44 @@ public final class NetworkSpeedMonitor: ObservableObject, @unchecked Sendable {
         pathMonitor.start(queue: monitorQueue)
     }
 
-    public func startSamplingTimer(interval: TimeInterval = 1.0) {
+    /// Must run on `samplerQueue`.
+    private func startSamplingTimer(interval: TimeInterval = 1.0) {
         timer?.cancel()
-        timer = nil
+        currentInterval = interval
 
         let newTimer = DispatchSource.makeTimerSource(queue: samplerQueue)
-        // 250ms leeway enables macOS timer coalescing on Apple Silicon Efficiency cores
-        newTimer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(250))
-
+        // 25% leeway lets macOS coalesce this wake-up with others.
+        newTimer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(Int(interval * 250)))
         newTimer.setEventHandler { [weak self] in
             self?.sampleNetworkSpeed()
         }
-
         newTimer.resume()
         self.timer = newTimer
     }
 
     public func stopMonitoring() {
-        timer?.cancel()
-        timer = nil
+        samplerQueue.sync {
+            timer?.cancel()
+            timer = nil
+        }
         pathMonitor.cancel()
     }
 
+    private var sampledInterfaceName: String?
+
+    /// Runs on `samplerQueue`.
     private func sampleNetworkSpeed() {
         lock.lock()
         let target = activeInterfaceName
+        let detail = isDetailVisible
         lock.unlock()
 
         let now = Date()
         let currentBytes = sampler.queryBytes(forInterface: target)
 
-        guard let prevBytes = lastSampleBytes, let prevDate = lastSampleDate else {
+        // New interface (Wi-Fi <-> Ethernet, VPN): its counters are unrelated to the old ones, start over.
+        guard target == sampledInterfaceName, let prevBytes = lastSampleBytes, let prevDate = lastSampleDate else {
+            sampledInterfaceName = target
             lastSampleBytes = currentBytes
             lastSampleDate = now
             return
@@ -143,19 +189,26 @@ public final class NetworkSpeedMonitor: ObservableObject, @unchecked Sendable {
         lastSampleBytes = currentBytes
         lastSampleDate = now
 
-        let speedIn = UInt64(Double(deltaIn) / timeDelta)
-        let speedOut = UInt64(Double(deltaOut) / timeDelta)
-        let newSpeed = NetworkSpeed(bytesInPerSec: speedIn, bytesOutPerSec: speedOut, timestamp: now)
-
-        // Record transfer in persistent store
+        let newSpeed = NetworkSpeed(
+            bytesInPerSec: UInt64(Double(deltaIn) / timeDelta),
+            bytesOutPerSec: UInt64(Double(deltaOut) / timeDelta),
+            timestamp: now
+        )
         bandwidthStore.recordTransfer(bytesIn: deltaIn, bytesOut: deltaOut, date: now)
 
+        DispatchQueue.main.async {
+            if self.currentSpeed.bytesInPerSec != newSpeed.bytesInPerSec || self.currentSpeed.bytesOutPerSec != newSpeed.bytesOutPerSec {
+                self.currentSpeed = newSpeed
+            }
+        }
+        if detail { publishUsage() }
+    }
+
+    private func publishUsage() {
         let newMonth = bandwidthStore.getCurrentMonthUsage()
         let newToday = bandwidthStore.getTodayUsage()
         let newSession = bandwidthStore.getSessionUsage()
-
         DispatchQueue.main.async {
-            self.currentSpeed = newSpeed
             self.monthUsage = newMonth
             self.todayUsage = newToday
             self.sessionUsage = newSession

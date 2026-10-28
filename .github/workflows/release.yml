@@ -1,0 +1,75 @@
+name: Release
+
+# Push a tag like v1.2.0 (must match FluxBarInfo.version) to publish
+# FluxBar.zip (used by the curl installer) and FluxBar.dmg to GitHub Releases.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      HAS_SIGNING_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check tag matches version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/ClipCore/FluxBarInfo.swift)"
+          [ "v$VERSION" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME != version $VERSION"; exit 1; }
+
+      - name: Test
+        run: swift test
+
+      # Optional: Developer ID signing + notarization. Add these repository secrets to enable:
+      #   MACOS_CERT_P12 (base64 .p12), MACOS_CERT_PASSWORD, SIGN_IDENTITY,
+      #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (app-specific password)
+      - name: Import signing certificate
+        if: env.HAS_SIGNING_CERT == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          security create-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          xcrun notarytool store-credentials fluxbar --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+          echo "NOTARY_PROFILE=fluxbar" >> "$GITHUB_ENV"
+
+      - name: Build app, zip and dmg (universal)
+        env:
+          UNIVERSAL: "1"
+          SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
+        run: scripts/build-app.sh
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/FluxBar.zip dist/FluxBar.zip.sha256 dist/FluxBar.dmg dist/FluxBar.dmg.sha256 \
+            --title "FluxBar ${GITHUB_REF_NAME#v}" --generate-notes
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FluxBar
+          path: |
+            dist/FluxBar.zip
+            dist/FluxBar.dmg

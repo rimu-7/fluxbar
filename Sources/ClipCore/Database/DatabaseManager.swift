@@ -206,55 +206,54 @@ public final class DatabaseManager: @unchecked Sendable {
         }
     }
 
+    public func mostRecentClip() throws -> ClipItem? {
+        try dbWriter.read { db in
+            try ClipItem.fetchOne(db, sql: "SELECT * FROM clip_items ORDER BY updatedAt DESC, id DESC LIMIT 1;")
+        }
+    }
+
     // MARK: - Keyset Pagination (Ultra-low memory list projection)
 
-    /// Fetches lightweight `ClipListSummary` items (only ~200 bytes each) using SQLite keyset pagination
+    /// Fetches lightweight `ClipListSummary` rows, pinned first, then most recently used.
+    /// Pass the last row of the previous page as `after` to get the next page.
+    /// Paging on (isPinned, updatedAt, id) keeps rows unique across pages.
     public func fetchNextPage(
-        beforeId: Int64? = nil,
+        after cursor: ClipListSummary? = nil,
         searchQuery: String = "",
         pinnedOnly: Bool = false,
         limit: Int = 25
     ) throws -> [ClipListSummary] {
         try dbWriter.read { db in
             let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            let columns = """
+                c.id, coalesce(c.previewText, substr(c.content, 1, 150)) as previewText,
+                c.formatType, c.sourceAppBundleId, c.sourceAppName,
+                c.isPinned, c.copyCount, c.charCount, c.lineCount,
+                c.createdAt, c.updatedAt, c.thumbnailFilename, c.fileURL
+            """
+            var sql: String
+            var arguments: [DatabaseValueConvertible] = []
             if trimmed.isEmpty {
-                var sql = """
-                SELECT id, coalesce(previewText, substr(content, 1, 150)) as previewText,
-                       formatType, sourceAppBundleId, sourceAppName,
-                       isPinned, copyCount, charCount, lineCount,
-                       createdAt, updatedAt, thumbnailFilename, fileURL
-                FROM clip_items
-                WHERE (? = 0 OR isPinned = 1)
-                """
-                var arguments: [DatabaseValueConvertible] = [pinnedOnly ? 1 : 0]
-                if let beforeId = beforeId {
-                    sql += " AND id < ?"
-                    arguments.append(beforeId)
-                }
-                sql += " ORDER BY isPinned DESC, id DESC LIMIT ?;"
-                arguments.append(limit)
-                return try ClipListSummary.fetchAll(db, sql: sql, arguments: StatementArguments(arguments))
+                sql = "SELECT \(columns) FROM clip_items c WHERE (? = 0 OR c.isPinned = 1)"
+                arguments.append(pinnedOnly ? 1 : 0)
             } else {
-                let sanitized = Self.sanitizeFTS5Query(trimmed)
-                var sql = """
-                SELECT c.id, coalesce(c.previewText, substr(c.content, 1, 150)) as previewText,
-                       c.formatType, c.sourceAppBundleId, c.sourceAppName,
-                       c.isPinned, c.copyCount, c.charCount, c.lineCount,
-                       c.createdAt, c.updatedAt, c.thumbnailFilename, c.fileURL
-                FROM clip_items c
+                sql = """
+                SELECT \(columns) FROM clip_items c
                 JOIN clip_items_fts f ON c.id = f.rowid
-                WHERE clip_items_fts MATCH ?
-                  AND (? = 0 OR c.isPinned = 1)
+                WHERE clip_items_fts MATCH ? AND (? = 0 OR c.isPinned = 1)
                 """
-                var arguments: [DatabaseValueConvertible] = [sanitized, pinnedOnly ? 1 : 0]
-                if let beforeId = beforeId {
-                    sql += " AND c.id < ?"
-                    arguments.append(beforeId)
-                }
-                sql += " ORDER BY c.isPinned DESC, c.id DESC LIMIT ?;"
-                arguments.append(limit)
-                return try ClipListSummary.fetchAll(db, sql: sql, arguments: StatementArguments(arguments))
+                arguments.append(Self.sanitizeFTS5Query(trimmed))
+                arguments.append(pinnedOnly ? 1 : 0)
             }
+            if let cursor, let id = cursor.id {
+                sql += " AND (c.isPinned, c.updatedAt, c.id) < (?, ?, ?)"
+                arguments.append(cursor.isPinned ? 1 : 0)
+                arguments.append(cursor.updatedAt)
+                arguments.append(id)
+            }
+            sql += " ORDER BY c.isPinned DESC, c.updatedAt DESC, c.id DESC LIMIT ?;"
+            arguments.append(limit)
+            return try ClipListSummary.fetchAll(db, sql: sql, arguments: StatementArguments(arguments))
         }
     }
 
@@ -273,6 +272,13 @@ public final class DatabaseManager: @unchecked Sendable {
             return "\"\(query.replacingOccurrences(of: "\"", with: "\"\""))\""
         }
         return clean.map { "\"\($0)\"*" }.joined(separator: " ")
+    }
+
+    /// Marks a clip as just used (moves it to the top) without rewriting its content.
+    public func touchClip(id: Int64) throws {
+        try dbWriter.write { db in
+            try db.execute(sql: "UPDATE clip_items SET updatedAt = ?, copyCount = copyCount + 1 WHERE id = ?;", arguments: [Date(), id])
+        }
     }
 
     // MARK: - Pin / Unpin
@@ -321,7 +327,7 @@ public final class DatabaseManager: @unchecked Sendable {
     /// Pinned clips are NEVER deleted automatically.
     @discardableResult
     public func performCleanup() throws -> Int {
-        try dbWriter.write { db in
+        let deleted = try dbWriter.write { db in
             var deletedTotal = 0
 
             // 1. Time-based retention (if retentionDays > 0)
@@ -351,6 +357,43 @@ public final class DatabaseManager: @unchecked Sendable {
 
             return deletedTotal
         }
+        sweepOrphanedFiles()
+        return deleted
+    }
+
+    /// Deletes blob and thumbnail files that no clip points to any more
+    /// (left behind by deletes, history pruning and "Clear").
+    /// Files younger than 10 minutes are kept, so a clip being saved right now is never affected.
+    public func sweepOrphanedFiles() {
+        guard dbPath != nil else { return } // in-memory test databases don't own the shared folders
+        let refs: (blobs: Set<String>, thumbs: Set<String>)
+        do {
+            refs = try dbWriter.read { db in
+                var blobs = Set<String>()
+                let blobRows = try Data.fetchAll(db, sql: "SELECT rtfData FROM clip_items WHERE rtfData IS NOT NULL AND length(rtfData) < 128;")
+                for data in blobRows {
+                    if let s = String(data: data, encoding: .utf8), s.hasPrefix("blob://") {
+                        blobs.insert(String(s.dropFirst(7)) + ".bin")
+                    }
+                }
+                let thumbs = Set(try String.fetchAll(db, sql: "SELECT thumbnailFilename FROM clip_items WHERE thumbnailFilename IS NOT NULL;"))
+                return (blobs, thumbs)
+            }
+        } catch {
+            return
+        }
+
+        let fm = FileManager.default
+        let cutoff = Date().addingTimeInterval(-600)
+        func sweep(_ dir: URL, keep: Set<String>) {
+            guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+            for file in files where !keep.contains(file.lastPathComponent) {
+                let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantFuture
+                if modified < cutoff { try? fm.removeItem(at: file) }
+            }
+        }
+        sweep(ClipBlobManager.shared.blobsDirectoryURL, keep: refs.blobs)
+        sweep(ThumbnailService.thumbnailsDirectoryURL, keep: refs.thumbs)
     }
 
     public func optimizeDatabase() throws {

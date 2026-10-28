@@ -8,20 +8,18 @@ import NetCore
 struct FluxCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "flux",
-        abstract: "FluxBar Unified macOS Menu Bar & Hardware Power, Network, and Clipboard CLI",
-        version: "1.1.0",
+        abstract: "FluxBar command line: clipboard history, battery charge limit and network usage.",
+        version: FluxBarInfo.version,
         subcommands: [
             ClipCommand.self,
             PowerCommand.self,
             NetCommand.self
-        ],
-        defaultSubcommand: PowerCommand.self,
-        aliases: ["nkit"]
+        ]
     )
 }
 
 // =============================================================================
-// MARK: - CLIPBOARD COMMANDS (`nkit clip`)
+// MARK: - CLIPBOARD COMMANDS (`flux clip`)
 // =============================================================================
 
 struct ClipCommand: ParsableCommand {
@@ -109,8 +107,7 @@ struct ClipGetCommand: ParsableCommand {
     func run() throws {
         let db = DatabaseManager.shared
         guard let clip = try db.fetchClip(id: id) else {
-            print("❌ Clip #\(id) not found.")
-            return
+            throw CLIError("Clip #\(id) not found.")
         }
 
         if json {
@@ -136,10 +133,9 @@ struct ClipCopyCommand: ParsableCommand {
 
     func run() throws {
         let db = DatabaseManager.shared
-        let clips = try db.queryClips(searchQuery: "", limit: 1000)
 
         if let id = Int64(target.replacingOccurrences(of: "#", with: "")),
-           let clip = clips.first(where: { $0.id == id }) {
+           let clip = try db.fetchClip(id: id) {
             MainActor.assumeIsolated {
                 PasteboardService.shared.copyToPasteboard(item: clip)
             }
@@ -147,7 +143,7 @@ struct ClipCopyCommand: ParsableCommand {
             return
         }
 
-        let saved = try db.recordClip(content: target, sourceAppName: "Terminal (nkit)")
+        let saved = try db.recordClip(content: target, sourceAppName: "Terminal (flux)")
         MainActor.assumeIsolated {
             PasteboardService.shared.copyToPasteboard(item: saved)
         }
@@ -163,20 +159,19 @@ struct ClipPasteCommand: ParsableCommand {
 
     func run() throws {
         let db = DatabaseManager.shared
-        let clips = try db.queryClips(searchQuery: "", limit: 100)
 
         if let clipId = id {
-            guard let clip = clips.first(where: { $0.id == clipId }) else {
-                print("Error: Clip #\(clipId) not found.")
-                return
+            guard let clip = try db.fetchClip(id: clipId) else {
+                throw CLIError("Clip #\(clipId) not found.")
             }
             print(clip.content)
         } else {
-            guard let latest = clips.first else {
-                print("Clipboard history is empty.")
-                return
+            // Most recently used, ignoring pin order.
+            guard let newest = try db.mostRecentClip() else {
+                FileHandle.standardError.write(Data("Clipboard history is empty.\n".utf8))
+                throw ExitCode(1)
             }
-            print(latest.content)
+            print(newest.content)
         }
     }
 }
@@ -224,215 +219,185 @@ struct ClipStatsCommand: ParsableCommand {
 }
 
 // =============================================================================
-// MARK: - POWER & BATTERY COMMANDS (`nkit power`)
+// MARK: - POWER & BATTERY COMMANDS (`flux power`)
 // =============================================================================
 
 struct PowerCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "power",
-        abstract: "Apple Silicon & Intel hardware battery limiter, SMC bypass, and live power analytics",
+        abstract: "Battery status and charge limit",
+        discussion: """
+        The charge limit is enforced by a small root helper (com.fluxbar.powerd).
+        Install it once with 'flux power install'; after that 'flux power limit' needs no password.
+        """,
         subcommands: [
             PowerStatusCommand.self,
             PowerLimitCommand.self,
-            PowerBypassCommand.self,
-            PowerDischargeCommand.self,
-            PowerMagSafeCommand.self,
-            PowerAuthorizeCommand.self
+            PowerInstallCommand.self,
+            PowerUninstallCommand.self
         ],
         defaultSubcommand: PowerStatusCommand.self
     )
 }
 
 struct PowerStatusCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "status", abstract: "Show comprehensive battery, charger, and peripheral telemetry")
+    static let configuration = CommandConfiguration(commandName: "status", abstract: "Show battery, charger and charge limit status")
 
-    @Flag(name: .long, help: "Output as raw JSON")
+    @Flag(name: .long, help: "Output as JSON")
     var json: Bool = false
 
     func run() throws {
-        let monitor = BatteryMonitor.shared
-        let telemetry = monitor.currentTelemetry
-        let limiter = ChargeLimiter.shared
+        let telemetry = BatteryMonitor.fetchTelemetry(deep: true)
+        let installed = PowerHelperManager.isInstalled
+        let config = PowerHelperManager.currentConfig()
+        let daemon = PowerHelperManager.daemonStatus()
 
         if json {
+            struct Output: Encodable {
+                let battery: BatteryTelemetry
+                let limiter: ChargeLimitConfig
+                let helperInstalled: Bool
+                let helper: PowerDaemonStatus?
+            }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(telemetry)
-            if let output = String(data: data, encoding: .utf8) {
-                print(output)
-            }
+            let data = try encoder.encode(Output(battery: telemetry, limiter: config, helperInstalled: installed, helper: daemon))
+            print(String(decoding: data, as: UTF8.self))
             return
         }
 
-        print("====================================================================")
-        print("  ⚡️ FluxBar Power & Battery Hardware Telemetry")
-        print("====================================================================")
-        print("Battery Level:          \(telemetry.percentage)% (\(telemetry.chargingState.statusDescription))")
-        print("Power Source:           \(telemetry.powerSource)")
-        print("Health Status:          \(String(format: "%.1f%%", telemetry.healthPercentage)) (\(telemetry.healthGrade))")
-        print("Cycle Count:            \(telemetry.cycleCount) / \(telemetry.ratedCycles) rated cycles")
-        print("Cell Temperature:       \(String(format: "%.1f°C", telemetry.temperature)) (\(telemetry.thermalStateDescription))")
-        print("Voltage Rail:           \(String(format: "%.2f V", Double(telemetry.voltage) / 1000.0)) (\(telemetry.voltage) mV)")
-        print("Amperage Flow:          \(telemetry.amperage) mA")
-        print("Battery Wattage:        \(String(format: "%.1f W", telemetry.wattage))")
+        func row(_ label: String, _ value: String) {
+            print(label.padding(toLength: 18, withPad: " ", startingAt: 0) + value)
+        }
 
-        print("--------------------------------------------------------------------")
-        print("  🔌 Charger Hardware & Live Power Input")
-        print("--------------------------------------------------------------------")
+        row("Battery", "\(telemetry.percentage)% · \(telemetry.chargingState.statusDescription)")
+        row("Power source", telemetry.powerSource)
+        row("Health", String(format: "%.1f%% (%@)", telemetry.healthPercentage, telemetry.healthGrade))
+        row("Cycles", "\(telemetry.cycleCount)")
+        row("Temperature", String(format: "%.1f °C", telemetry.temperature))
+        row("Battery power", String(format: "%.1f W", telemetry.wattage))
         if telemetry.isPluggedIn {
-            let watts = telemetry.adapterWatts ?? 0
-            let name = telemetry.adapterName ?? "PD Charger"
-            print("Adapter Status:         Connected (\(watts)W \(name))")
-            if let port = telemetry.chargerPortIndex {
-                print("Connection Port:        Thunderbolt / USB-C Port \(port)")
-            }
-            if let liveWatts = telemetry.inputPowerWatts {
-                print("Live Negotiated Input:  \(String(format: "%.1f W", liveWatts)) (\(String(format: "%.0f%%", (liveWatts / max(1.0, Double(watts))) * 100)) of capacity)")
-            }
-            if let inVolt = telemetry.inputVoltage ?? telemetry.adapterVoltage {
-                print("Input Voltage Rail:     \(String(format: "%.1f V", inVolt)) DC")
-            }
-            if let inAmp = telemetry.inputCurrentAmps ?? telemetry.adapterAmperage {
-                print("Input Current Draw:     \(String(format: "%.2f A", inAmp)) (Max \(String(format: "%.2f A", telemetry.adapterAmperage ?? 5.0)))")
-            }
-            if !telemetry.adapterProfiles.isEmpty {
-                print("Supported PD Profiles:  \(telemetry.adapterProfiles.joined(separator: " • "))")
+            var charger = "\(telemetry.adapterWatts.map { "\($0) W " } ?? "")\(telemetry.adapterName ?? "adapter")"
+            if let input = telemetry.inputPowerWatts { charger += String(format: " · drawing %.1f W", input) }
+            row("Charger", charger)
+        }
+        if let minutes = telemetry.timeRemainingMinutes {
+            row(telemetry.isCharging ? "Time to full" : "Time left", "\(minutes / 60)h \(minutes % 60)m")
+        }
+        print("")
+        if installed {
+            row("Charge limit", config.isEnabled && config.limit < 100 ? "\(config.limit)% (resumes at \(config.limit - config.hysteresis)%)" : "off")
+            if let daemon {
+                row("Helper", "running · \(daemon.reason)")
+                if !daemon.smcWritable { row("", "⚠️  This Mac's charge controller is not supported") }
+            } else {
+                row("Helper", "installed, not reporting yet")
             }
         } else {
-            print("Adapter Status:         Unplugged (Running on internal battery)")
-            if let lastWatts = telemetry.adapterWatts {
-                print("Last Connected:         \(lastWatts)W \(telemetry.adapterName ?? "PD Charger")")
-            }
+            row("Charge limit", "helper not installed (run: flux power install)")
         }
-
-        print("--------------------------------------------------------------------")
-        print("  📱 Reverse Charging (Peripheral Power Delivery)")
-        print("--------------------------------------------------------------------")
-        if !telemetry.connectedAccessories.isEmpty {
-            for acc in telemetry.connectedAccessories {
-                let battStr = acc.batteryLevel != nil ? " [Battery: \(acc.batteryLevel!)%]" : ""
-                print("• \(acc.deviceName) on \(acc.portName): Sourcing ~\(String(format: "%.1f W", acc.estimatedOutputWatts))\(battStr)")
-            }
-        } else {
-            print("Connected Devices:      0 (Ports ready for reverse PD up to 15W per port)")
-        }
-
-        print("--------------------------------------------------------------------")
-        print("  🛡️ Hardware SMC Charge Limiter & AC Bypass")
-        print("--------------------------------------------------------------------")
-        print("Charge Limiter:         \(limiter.isLimiterEnabled ? "Enabled (Target: \(limiter.chargeLimit)%)" : "Disabled (100% full charge)")")
-        print("Hardware AC Bypass:     \(limiter.isAdapterBypassActive ? "ACTIVE (Running 100% from wall adapter)" : "Inactive")")
-        print("SMC Generation:         \(SMCService.shared.detectedHardwareGeneration.rawValue)")
-        print("Helper Tool Status:     \(SMCService.shared.isHelperInstalled ? "Installed & Authorized" : "Not Authorized (Run 'nkit power authorize')")")
-        print("====================================================================")
     }
 }
 
 struct PowerLimitCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "limit", abstract: "Set hardware battery charge limit percentage")
+    static let configuration = CommandConfiguration(
+        commandName: "limit",
+        abstract: "Set the charge limit (50-100), or 'off'"
+    )
 
-    @Argument(help: "Target percentage limit: 50, 60, 70, 80, 85, 90, 95, or 100")
-    var percentage: Int
+    @Argument(help: "Percentage 50-100, or 'off' to charge normally")
+    var value: String
 
     func run() throws {
-        let clamped = max(50, min(100, percentage))
-        let limiter = ChargeLimiter.shared
-
-        if clamped == 100 {
-            limiter.setEnabled(false)
-            SMCService.shared.setChargingInhibited(false, limitPercentage: 100)
-            print("✅ Hardware charge limiter disabled. MacBook will charge up to 100%.")
-        } else {
-            limiter.configure(isEnabled: true, limit: clamped, hysteresis: 3)
-            let success = SMCService.shared.setChargingInhibited(true, limitPercentage: clamped)
-            if success {
-                print("✅ Charge limit set to \(clamped)%. Hardware AC bypass will engage at \(clamped)%.")
-            } else {
-                print("⚠️ Charge limit updated in software to \(clamped)%. SMC hardware write requires privilege authorization.")
-                print("   Run: sudo nkit power limit \(clamped)")
+        var config = PowerHelperManager.currentConfig()
+        switch value.lowercased() {
+        case "off", "disable", "100":
+            config.isEnabled = false
+        case "on", "enable":
+            config.isEnabled = true
+        default:
+            guard let pct = Int(value.trimmingCharacters(in: CharacterSet(charactersIn: "% "))), (50...100).contains(pct) else {
+                throw ValidationError("Use a number from 50 to 100, or 'off'.")
             }
+            config.limit = pct
+            config.isEnabled = pct < 100
         }
+
+        guard PowerHelperManager.isInstalled else {
+            print("The battery helper isn't installed yet. Installing (needs your password once)…")
+            try PowerInstallCommand.runInstaller(config: config)
+            return
+        }
+        do {
+            try PowerHelperManager.save(config)
+        } catch {
+            throw CLIError("Couldn't save the limit (\(error.localizedDescription)). Only admin users can change it.")
+        }
+        print(config.isEnabled ? "✅ Charging will hold at \(config.limit)%." : "✅ Limiter off. Charging normally to 100%.")
     }
 }
 
-struct PowerBypassCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "bypass", abstract: "Manually toggle AC adapter direct bypass")
+struct PowerInstallCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "install", abstract: "Install the root helper that enforces the charge limit")
 
-    @Argument(help: "State: on or off")
-    var state: String
+    @Option(name: .long, help: "Initial charge limit (50-100)")
+    var limit: Int?
 
     func run() throws {
-        let enable = (state.lowercased() == "on" || state.lowercased() == "1" || state.lowercased() == "true")
-        let success = SMCService.shared.setChargingInhibited(enable, limitPercentage: 80)
-        if success {
-            print("✅ Direct AC adapter bypass set to: \(enable ? "ON (Charging Inactive)" : "OFF (Normal Charging)")")
-        } else {
-            print("⚠️ Could not toggle bypass directly. Elevated privileges required.")
-            print("   Run: sudo nkit power bypass \(state)")
+        var config = PowerHelperManager.currentConfig()
+        if let limit { config.limit = ChargeLimitConfig.clampLimit(limit); config.isEnabled = config.limit < 100 }
+        try Self.runInstaller(config: config)
+    }
+
+    static func runInstaller(config: ChargeLimitConfig) throws {
+        guard let daemon = PowerHelperManager.bundledDaemonPath() else {
+            throw CLIError("com.fluxbar.powerd wasn't found next to flux. Reinstall FluxBar.")
         }
+        try sudo([daemon, "install", "--limit", "\(config.limit)", "--enabled", config.isEnabled ? "true" : "false"])
     }
 }
 
-struct PowerMagSafeCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "magsafe", abstract: "Set MagSafe 3 LED indicator color")
-
-    @Argument(help: "Color: green or auto")
-    var color: String
+struct PowerUninstallCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "uninstall", abstract: "Remove the helper and restore normal charging")
 
     func run() throws {
-        let isGreen = (color.lowercased() == "green" || color.lowercased() == "on")
-        let success = SMCService.shared.setMagSafeLED(green: isGreen)
-        if success {
-            print("✅ MagSafe 3 LED set to: \(isGreen ? "Green (Bypass / Full)" : "Auto (Apple Default)")")
-        } else {
-            print("⚠️ Could not adjust MagSafe LED directly. Elevated privileges required.")
+        let path = FileManager.default.isExecutableFile(atPath: PowerHelperManager.installedBinaryPath)
+            ? PowerHelperManager.installedBinaryPath
+            : PowerHelperManager.bundledDaemonPath()
+        guard let path else {
+            print("The battery helper isn't installed.")
+            return
         }
+        try sudo([path, "uninstall"])
     }
 }
 
-struct PowerDischargeCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "discharge", abstract: "Force battery discharge on AC power down to limit")
-
-    @Argument(help: "State: on or off")
-    var state: String
-
-    func run() throws {
-        let enable = (state.lowercased() == "on" || state.lowercased() == "1" || state.lowercased() == "true")
-        let success = SMCService.shared.setChargingInhibited(true, limitPercentage: 80, forceDischarge: enable)
-        if success {
-            print("✅ Force discharge on AC set to: \(enable ? "ON (Active Discharge)" : "OFF (Normal AC Inhibit)")")
-        } else {
-            print("⚠️ Could not adjust discharge state directly. Elevated privileges required.")
-            print("   Run: sudo nkit power discharge \(state)")
-        }
-    }
+/// A runtime failure: printed as "Error: …" without the usage text, exit code 1.
+struct CLIError: Error, CustomStringConvertible {
+    let description: String
+    init(_ message: String) { description = message }
 }
 
-struct PowerAuthorizeCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "authorize", abstract: "Authorize SMC hardware limiter daemon via Touch ID / Password")
-
-    func run() throws {
-        print("Authorizing com.notchkit.powerd privileged helper...")
-        let semaphore = DispatchSemaphore(value: 0)
-        var success = false
-
-        Task {
-            success = await PowerHelperManager.requestHelperInstallation()
-            semaphore.signal()
-        }
-        semaphore.wait()
-
-        if success {
-            print("✅ Successfully authorized and installed com.notchkit.powerd!")
-        } else {
-            print("❌ Authorization cancelled or failed. You can also run 'make install-helper'.")
-        }
+/// Runs a command as root, prompting for the password in the terminal when needed.
+func sudo(_ command: [String]) throws {
+    let process = Process()
+    if geteuid() == 0 {
+        process.executableURL = URL(fileURLWithPath: command[0])
+        process.arguments = Array(command.dropFirst())
+    } else {
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        process.arguments = command
+    }
+    try process.run()
+    process.waitUntilExit()
+    if process.terminationStatus != 0 {
+        throw ExitCode(process.terminationStatus)
     }
 }
 
 // =============================================================================
-// MARK: - NETWORK SPEED & BANDWIDTH COMMANDS (`nkit net`)
+// MARK: - NETWORK SPEED & BANDWIDTH COMMANDS (`flux net`)
 // =============================================================================
 
 struct NetCommand: ParsableCommand {
@@ -454,11 +419,18 @@ struct NetStatsCommand: ParsableCommand {
     var json: Bool = false
 
     func run() throws {
-        let monitor = NetworkSpeedMonitor.shared
-        let speed = monitor.currentSpeed
-        let todayUsage = monitor.todayUsage
-        let monthUsage = monitor.monthUsage
-        let ifInfo = monitor.interfaceInfo
+        // Measure for one second instead of starting the app's monitor.
+        let sampler = NetworkByteSampler()
+        let before = sampler.queryBytes(forInterface: nil)
+        Thread.sleep(forTimeInterval: 1.0)
+        let after = sampler.queryBytes(forInterface: nil)
+        let speed = NetworkSpeed(
+            bytesInPerSec: NetworkByteSampler.computeDelta(current: after.bytesIn, previous: before.bytesIn),
+            bytesOutPerSec: NetworkByteSampler.computeDelta(current: after.bytesOut, previous: before.bytesOut)
+        )
+        let store = BandwidthStore.shared
+        let todayUsage = store.getTodayUsage()
+        let monthUsage = store.getCurrentMonthUsage()
 
         if json {
             let dict: [String: Any] = [
@@ -466,28 +438,18 @@ struct NetStatsCommand: ParsableCommand {
                 "downloadBytesPerSec": speed.bytesInPerSec,
                 "uploadFormatted": speed.formattedUpload,
                 "downloadFormatted": speed.formattedDownload,
-                "interface": ifInfo.name,
-                "interfaceType": ifInfo.typeName,
                 "todayUsageBytes": todayUsage.totalBytes,
                 "monthlyUsageBytes": monthUsage.totalBytes
             ]
             let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
-            if let output = String(data: data, encoding: .utf8) {
-                print(output)
-            }
+            print(String(decoding: data, as: UTF8.self))
             return
         }
 
-        print("====================================================================")
-        print("  📶 FluxBar Real-Time Network & Bandwidth Stats")
-        print("====================================================================")
-        print("Upload Rate (↑):        \(speed.formattedUpload)")
-        print("Download Rate (↓):      \(speed.formattedDownload)")
-        print("Primary Interface:      \(ifInfo.displayName)")
-        print("Today's Data Usage:     \(todayUsage.formattedTotal)")
-        print("Monthly Data Usage:     \(monthUsage.formattedTotal)")
-        print("Sampling Architecture:  Direct BSD Kernel sysctl (NET_RT_IFLIST2)")
-        print("====================================================================")
+        print("Upload       \(speed.formattedUpload)")
+        print("Download     \(speed.formattedDownload)")
+        print("Today        \(todayUsage.formattedTotal)")
+        print("This month   \(monthUsage.formattedTotal)")
     }
 }
 

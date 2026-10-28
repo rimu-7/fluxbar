@@ -1,148 +1,107 @@
 import Foundation
-import Combine
-import AppKit
 
-public extension Notification.Name {
-    static let batteryChargeLimiterStateDidChange = Notification.Name("com.notchkit.powercore.stateDidChange")
-    static let batteryChargeLimitReached = Notification.Name("com.notchkit.powercore.limitReached")
-    static let batteryThermalCutoutTriggered = Notification.Name("com.notchkit.powercore.thermalCutoutTriggered")
-}
-
-/// Dynamic charge limiter engine controlling battery charging thresholds and adapter bypass
+/// Charge limit state machine.
+///
+/// Pure logic: feed it battery telemetry and it decides whether charging should be paused.
+/// When the decision changes it calls `actuator`, which in the daemon writes the SMC.
+/// It never touches hardware on its own, so the app, CLI and tests can use it safely.
 public final class ChargeLimiter: @unchecked Sendable {
-    public static let shared = ChargeLimiter()
+    public typealias Actuator = (_ inhibit: Bool, _ limit: Int) -> Bool
+
+    /// Pause charging above this cell temperature (°C)…
+    public static let thermalCutoutCelsius: Double = 40.0
+    /// …and allow it again once the cells cool below this.
+    public static let thermalResumeCelsius: Double = 37.0
 
     public private(set) var isLimiterEnabled: Bool
     public private(set) var chargeLimit: Int
     public private(set) var hysteresis: Int
-    public private(set) var isAdapterBypassActive: Bool
+    /// True while charging is paused (the Mac runs from the adapter, battery idle).
+    public private(set) var isAdapterBypassActive: Bool = false
+    public private(set) var isThermalPauseActive: Bool = false
+    public private(set) var lastReason: String = "Starting"
 
-    private let smcService: SMCService
-    private let monitor: BatteryMonitor
-    private var cancellables = Set<AnyCancellable>()
-    private let lock = NSRecursiveLock()
+    private let actuator: Actuator?
+    private let lock = NSLock()
 
     public init(
-        smcService: SMCService = .shared,
-        monitor: BatteryMonitor = .shared,
         isLimiterEnabled: Bool = true,
         chargeLimit: Int = 80,
-        hysteresis: Int = 3
+        hysteresis: Int = 3,
+        actuator: Actuator? = nil
     ) {
-        self.smcService = smcService
-        self.monitor = monitor
         self.isLimiterEnabled = isLimiterEnabled
-        self.chargeLimit = chargeLimit
-        self.hysteresis = hysteresis
-        self.isAdapterBypassActive = false
-
-        setupTelemetryObservation()
-        setupSleepWakeObservation()
+        self.chargeLimit = ChargeLimitConfig.clampLimit(chargeLimit)
+        self.hysteresis = max(1, min(10, hysteresis))
+        self.actuator = actuator
     }
 
-    // MARK: - Configuration Updates
+    public convenience init(config: ChargeLimitConfig, actuator: Actuator? = nil) {
+        self.init(isLimiterEnabled: config.isEnabled, chargeLimit: config.limit, hysteresis: config.hysteresis, actuator: actuator)
+    }
 
     public func configure(isEnabled: Bool, limit: Int, hysteresis: Int = 3) {
         lock.lock()
-        defer { lock.unlock() }
-
-        self.isLimiterEnabled = isEnabled
-        self.chargeLimit = max(50, min(100, limit))
-        self.hysteresis = max(1, min(5, hysteresis))
-
-        evaluateCurrentStateUnlocked(telemetry: monitor.currentTelemetry)
+        isLimiterEnabled = isEnabled
+        chargeLimit = ChargeLimitConfig.clampLimit(limit)
+        self.hysteresis = max(1, min(10, hysteresis))
+        lock.unlock()
     }
 
-    public func setChargeLimit(_ limit: Int) {
-        configure(isEnabled: isLimiterEnabled, limit: limit, hysteresis: hysteresis)
+    public func configure(_ config: ChargeLimitConfig) {
+        configure(isEnabled: config.isEnabled, limit: config.limit, hysteresis: config.hysteresis)
     }
 
-    public func setEnabled(_ enabled: Bool) {
-        configure(isEnabled: enabled, limit: chargeLimit, hysteresis: hysteresis)
-    }
-
-    // MARK: - Telemetry Observation & Hysteresis Evaluation
-
-    private func setupTelemetryObservation() {
-        monitor.telemetryPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] telemetry in
-                self?.evaluateCurrentState(telemetry: telemetry)
-            }
-            .store(in: &cancellables)
-    }
-
-    private func setupSleepWakeObservation() {
-        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self = self else { return }
-                self.lock.lock()
-                defer { self.lock.unlock() }
-                // Re-assert SMC charge limit upon waking to prevent macOS PMU override
-                self.evaluateCurrentStateUnlocked(telemetry: self.monitor.currentTelemetry)
-            }
-            .store(in: &cancellables)
-    }
-
-    public func evaluateCurrentState(telemetry: BatteryTelemetry) {
+    /// Evaluates telemetry and applies the result.
+    /// - Parameter reassert: write the current decision even if it did not change
+    ///   (used after wake and at startup, when the SMC may have been reset).
+    public func evaluateCurrentState(telemetry: BatteryTelemetry, reassert: Bool = false) {
         lock.lock()
         defer { lock.unlock() }
-        evaluateCurrentStateUnlocked(telemetry: telemetry)
+
+        let (inhibit, reason) = decide(telemetry: telemetry)
+        lastReason = reason
+        guard inhibit != isAdapterBypassActive || reassert else { return }
+
+        if let actuator = actuator {
+            // Only record the new state if the hardware accepted it, so a failed write is retried next time.
+            if actuator(inhibit, chargeLimit) {
+                isAdapterBypassActive = inhibit
+            }
+        } else {
+            isAdapterBypassActive = inhibit
+        }
     }
 
-    private func evaluateCurrentStateUnlocked(telemetry: BatteryTelemetry) {
+    // MARK: - Decision
+
+    private func decide(telemetry: BatteryTelemetry) -> (Bool, String) {
         guard isLimiterEnabled && chargeLimit < 100 else {
-            // Limiter disabled or set to 100% -> resume full normal charging
-            if isAdapterBypassActive {
-                isAdapterBypassActive = false
-                smcService.setChargingInhibited(false, limitPercentage: 100)
-                NotificationCenter.default.post(name: .batteryChargeLimiterStateDidChange, object: nil)
-            }
-            return
+            isThermalPauseActive = false
+            return (false, "Limiter off")
         }
-
-        // Only enforce limits while connected to AC power
         guard telemetry.isPluggedIn else {
-            if isAdapterBypassActive {
-                isAdapterBypassActive = false
-                NotificationCenter.default.post(name: .batteryChargeLimiterStateDidChange, object: nil)
-            }
-            return
+            isThermalPauseActive = false
+            return (false, "On battery")
         }
 
-        // Thermal Cutout Guard: Pause charging immediately if cell temperature exceeds 40.0°C
-        if telemetry.temperature > 40.0 {
-            if !isAdapterBypassActive {
-                isAdapterBypassActive = true
-                smcService.setChargingInhibited(true, limitPercentage: chargeLimit)
-                NotificationCenter.default.post(name: .batteryChargeLimiterStateDidChange, object: nil)
-                NotificationCenter.default.post(name: .batteryThermalCutoutTriggered, object: nil, userInfo: ["temperature": telemetry.temperature])
-            }
-            return
+        if telemetry.temperature >= Self.thermalCutoutCelsius {
+            isThermalPauseActive = true
+        } else if telemetry.temperature < Self.thermalResumeCelsius {
+            isThermalPauseActive = false
+        }
+        if isThermalPauseActive {
+            return (true, "Battery warm, charging paused")
         }
 
-        let currentPercent = telemetry.percentage
-
-        if currentPercent >= chargeLimit {
-            // Reached or exceeded target limit -> ENGAGE ADAPTER BYPASS
-            if !isAdapterBypassActive {
-                isAdapterBypassActive = true
-                smcService.setChargingInhibited(true, limitPercentage: chargeLimit)
-                NotificationCenter.default.post(name: .batteryChargeLimiterStateDidChange, object: nil)
-                NotificationCenter.default.post(
-                    name: .batteryChargeLimitReached,
-                    object: nil,
-                    userInfo: ["limit": chargeLimit, "percentage": currentPercent]
-                )
-            }
-        } else if currentPercent <= (chargeLimit - hysteresis) {
-            // Dropped below hysteresis band -> RESUME CHARGING
-            if isAdapterBypassActive {
-                isAdapterBypassActive = false
-                smcService.setChargingInhibited(false, limitPercentage: chargeLimit)
-                NotificationCenter.default.post(name: .batteryChargeLimiterStateDidChange, object: nil)
-            }
+        let percent = telemetry.percentage
+        if percent >= chargeLimit {
+            return (true, "Holding at \(chargeLimit)%")
         }
+        if percent <= chargeLimit - hysteresis {
+            return (false, "Charging to \(chargeLimit)%")
+        }
+        // Inside the hysteresis band: keep doing what we were doing.
+        return (isAdapterBypassActive, isAdapterBypassActive ? "Holding at \(chargeLimit)%" : "Charging to \(chargeLimit)%")
     }
 }

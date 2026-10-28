@@ -200,6 +200,14 @@ public enum Migrations {
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_clip_items_keyset ON clip_items (isPinned DESC, id DESC);")
         }
 
+        // List is ordered by most recently used (updatedAt), with id as tie-breaker for stable paging.
+        // Replaces two narrower indexes, so inserts also get cheaper.
+        migrator.registerMigration("v8_recent_first_keyset") { db in
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_clip_items_keyset;")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_clip_items_pinned_updated;")
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_clip_items_order ON clip_items (isPinned DESC, updatedAt DESC, id DESC);")
+        }
+
         return migrator
     }
 }

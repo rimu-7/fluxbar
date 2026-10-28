@@ -65,7 +65,11 @@ public final class SpeedMeterViewModel: ObservableObject {
             },
             onChange: { [weak self] newSettings in
                 Task { @MainActor [weak self] in
-                    self?.isSpeedMeterEnabled = newSettings.isSpeedMeterEnabled
+                    guard let self else { return }
+                    if self.isSpeedMeterEnabled != newSettings.isSpeedMeterEnabled {
+                        self.isSpeedMeterEnabled = newSettings.isSpeedMeterEnabled
+                    }
+                    self.monitor.setMeterVisible(newSettings.isSpeedMeterEnabled)
                 }
             }
         )
@@ -97,6 +101,7 @@ public final class SpeedMeterViewModel: ObservableObject {
     }
 
     public func setPopoverVisible(_ visible: Bool) {
+        monitor.setDetailVisible(visible)
         if visible {
             self.monthUsage = monitor.monthUsage
             self.todayUsage = monitor.todayUsage

@@ -80,6 +80,18 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
+    /// Opens the popover from whichever menu bar icon is visible.
+    public func showPopover() {
+        if unifiedPopover?.isShown == true { return }
+        if let button = clipStatusItem?.button, clipStatusItem?.isVisible == true {
+            selectedTab = .clipboard
+            presentPopover(relativeTo: button.bounds, of: button, edge: .minY)
+        } else if let button = speedStatusItem?.button, speedStatusItem?.isVisible == true {
+            selectedTab = .speedMeter
+            presentPopover(relativeTo: button.bounds, of: button, edge: .minY)
+        }
+    }
+
     public func closePopover() {
         unifiedPopover?.close()
     }
@@ -112,6 +124,7 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
             button.action = #selector(handleClipButtonClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
+        item.autosaveName = "FluxBarClipboard"
         item.isVisible = clipViewModel?.settings.isClipboardEnabled ?? true
         self.clipStatusItem = item
     }
@@ -125,6 +138,7 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             updateSpeedMeter(upload: 0.0, download: 0.0)
         }
+        item.autosaveName = "FluxBarSpeed"
         item.isVisible = speedViewModel?.isSpeedMeterEnabled ?? true
         self.speedStatusItem = item
     }
@@ -207,6 +221,7 @@ public final class StatusBarManager: NSObject, ObservableObject, NSPopoverDelega
             .sink { [weak self] settings in
                 self?.clipStatusItem?.isVisible = settings.isClipboardEnabled
                 self?.speedStatusItem?.isVisible = settings.isSpeedMeterEnabled
+                NetworkSpeedMonitor.shared.setMeterVisible(settings.isSpeedMeterEnabled)
             }
             .store(in: &cancellables)
     }

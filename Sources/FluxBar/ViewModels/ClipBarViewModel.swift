@@ -104,7 +104,7 @@ public final class ClipBarViewModel: ObservableObject {
         let pinnedOnly = (filterMode == .pinned)
         do {
             let items = try dbManager.fetchNextPage(
-                beforeId: nil,
+                after: nil,
                 searchQuery: currentQuery,
                 pinnedOnly: pinnedOnly,
                 limit: 25
@@ -124,7 +124,7 @@ public final class ClipBarViewModel: ObservableObject {
 
     public func fetchNextPageIfNeeded() {
         guard isPopoverVisible, !isLoadingNextPage, hasMorePages,
-              let lastItem = clips.last, let lastId = lastItem.id else { return }
+              let lastItem = clips.last else { return }
 
         isLoadingNextPage = true
         let currentQuery = searchQuery
@@ -132,7 +132,7 @@ public final class ClipBarViewModel: ObservableObject {
 
         do {
             let nextPage = try dbManager.fetchNextPage(
-                beforeId: lastId,
+                after: lastItem,
                 searchQuery: currentQuery,
                 pinnedOnly: pinnedOnly,
                 limit: 25

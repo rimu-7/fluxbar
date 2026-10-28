@@ -1,90 +1,102 @@
 import Foundation
 import ServiceManagement
 
-/// Helper for toggling and querying macOS Start at Login status.
-/// Supports both native macOS 13+ SMAppService and LaunchAgent plist fallback.
+/// Start at Login.
+///
+/// Inside FluxBar.app this uses the native login item (`SMAppService.mainApp`), which is what
+/// System Settings › General › Login Items shows and lets the user switch off.
+/// A LaunchAgent plist is only used for unbundled development builds (`swift run`).
 public enum LaunchAtLoginHelper {
     private static let launchAgentLabel = "com.fluxbar.FluxBar"
 
+    private static var launchAgentsDir: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+    }
+
     private static var launchAgentPlistURL: URL {
-        let launchAgentsDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-        return launchAgentsDir.appendingPathComponent("\(launchAgentLabel).plist")
+        launchAgentsDir.appendingPathComponent("\(launchAgentLabel).plist")
     }
 
     private static var legacyLaunchAgentPlistURLs: [URL] {
-        let launchAgentsDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-        return [
+        [
             launchAgentsDir.appendingPathComponent("com.notchkit.NotchKit.plist"),
             launchAgentsDir.appendingPathComponent("com.clipsuite.ClipBar.plist")
         ]
     }
 
-    public static var isEnabled: Bool {
-        // 1. Check macOS 13+ SMAppService if running inside a bundle
-        if Bundle.main.bundleIdentifier != nil {
-            let status = SMAppService.mainApp.status
-            if status == .enabled {
-                return true
-            }
-        }
+    private static var isBundledApp: Bool {
+        Bundle.main.bundleIdentifier != nil && Bundle.main.bundlePath.hasSuffix(".app")
+    }
 
-        // 2. Check LaunchAgent plist for SPM/standalone execution
-        return FileManager.default.fileExists(atPath: launchAgentPlistURL.path) || legacyLaunchAgentPlistURLs.contains { FileManager.default.fileExists(atPath: $0.path) }
+    public static var isEnabled: Bool {
+        if isBundledApp {
+            let status = SMAppService.mainApp.status
+            return status == .enabled || status == .requiresApproval
+        }
+        return FileManager.default.fileExists(atPath: launchAgentPlistURL.path)
     }
 
     public static func setEnabled(_ enable: Bool) {
-        if enable {
-            // Try SMAppService first if inside a bundle
-            if Bundle.main.bundleIdentifier != nil {
-                try? SMAppService.mainApp.register()
+        if isBundledApp {
+            // Remove plists written by older versions, otherwise the app would start twice.
+            removeLaunchAgentPlists()
+            do {
+                if enable {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                if enable { SMAppService.openSystemSettingsLoginItems() }
             }
+            return
+        }
 
-            // Write launch agent plist to guarantee login launch in both SPM and app bundle
+        if enable {
             writeLaunchAgentPlist()
         } else {
-            if Bundle.main.bundleIdentifier != nil {
-                try? SMAppService.mainApp.unregister()
-            }
-            removeLaunchAgentPlist()
+            removeLaunchAgentPlists()
+        }
+    }
+
+    /// Installed copies only, never a build in Downloads, a DMG or a dev folder.
+    private static var isInstalledInApplications: Bool {
+        let path = Bundle.main.bundlePath
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix("/Applications/") || path.hasPrefix(home + "/Applications/")
+    }
+
+    /// Called once at launch: clean up duplicate login entries from older versions.
+    public static func migrateLegacyEntries() {
+        guard isBundledApp, isInstalledInApplications else { return }
+        let hadPlist = ([launchAgentPlistURL] + legacyLaunchAgentPlistURLs).contains {
+            FileManager.default.fileExists(atPath: $0.path)
+        }
+        guard hadPlist else { return }
+        removeLaunchAgentPlists()
+        if SMAppService.mainApp.status != .enabled {
+            try? SMAppService.mainApp.register()
         }
     }
 
     private static func writeLaunchAgentPlist() {
         guard let execPath = Bundle.main.executablePath ?? CommandLine.arguments.first else { return }
         let resolvedPath = (execPath as NSString).resolvingSymlinksInPath
-
-        let plistContent = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key>
-            <string>\(launchAgentLabel)</string>
-            <key>ProgramArguments</key>
-            <array>
-                <string>\(resolvedPath)</string>
-            </array>
-            <key>RunAtLoad</key>
-            <true/>
-            <key>KeepAlive</key>
-            <false/>
-            <key>ProcessType</key>
-            <string>Interactive</string>
-        </dict>
-        </plist>
-        """
-
-        let fileManager = FileManager.default
-        let launchAgentsDir = launchAgentPlistURL.deletingLastPathComponent()
-        try? fileManager.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
-        try? plistContent.write(to: launchAgentPlistURL, atomically: true, encoding: .utf8)
+        let plist: [String: Any] = [
+            "Label": launchAgentLabel,
+            "ProgramArguments": [resolvedPath],
+            "RunAtLoad": true,
+            "KeepAlive": false,
+            "ProcessType": "Interactive"
+        ]
+        try? FileManager.default.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
+        if let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0) {
+            try? data.write(to: launchAgentPlistURL, options: .atomic)
+        }
     }
 
-    private static func removeLaunchAgentPlist() {
-        try? FileManager.default.removeItem(at: launchAgentPlistURL)
-        for url in legacyLaunchAgentPlistURLs {
+    private static func removeLaunchAgentPlists() {
+        for url in [launchAgentPlistURL] + legacyLaunchAgentPlistURLs {
             try? FileManager.default.removeItem(at: url)
         }
     }

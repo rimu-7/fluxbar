@@ -15,30 +15,35 @@ struct FluxBarApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Run purely as an accessory menu bar application (no Dock icon)
-        NSApplication.shared.setActivationPolicy(.accessory)
+        // Only one FluxBar at a time (e.g. login item + manual launch).
+        if let bundleID = Bundle.main.bundleIdentifier {
+            let me = NSRunningApplication.current
+            if NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains(where: { $0 != me }) {
+                NSApp.terminate(nil)
+                return
+            }
+        }
 
-        // Start background pasteboard monitoring
+        // Menu bar only: no Dock icon, no app menu.
+        NSApp.setActivationPolicy(.accessory)
+
+        LaunchAtLoginHelper.migrateLegacyEntries()
         PasteboardService.shared.startMonitoring()
 
-        // Set up rock-solid native AppKit status items for Clipboard, Speed Meter & Battery Limiter
         StatusBarManager.shared.setup(
             clipViewModel: ClipBarViewModel.shared,
             speedViewModel: SpeedMeterViewModel.shared,
             batteryViewModel: BatteryViewModel.shared
         )
+    }
 
-        print("=======================================================")
-        print("  🚀 FluxBar is running successfully!")
-        print("  • Look at your macOS menu bar (top right) for:")
-        print("    1. Copy icon (Clipboard History)")
-        print("    2. Speed Meter (Live 2-line ↑/↓ Network Speeds)")
-        print("  • Both icons open the unified UI (Clipboard | Battery | Speed).")
-        print("  • Press Ctrl+C in this terminal to stop.")
-        print("=======================================================")
-        fflush(stdout)
+    /// Double-clicking FluxBar in Finder / Launchpad while it's running opens the popover.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        StatusBarManager.shared.showPopover()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {

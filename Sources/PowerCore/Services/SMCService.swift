@@ -64,9 +64,8 @@ public final class SMCService: @unchecked Sendable {
         case getKeyInfo = 9
     }
 
-    public init() {
-        _ = openConnection()
-    }
+    /// The SMC connection is opened lazily on first use.
+    public init() {}
 
     deinit {
         closeConnection()
@@ -283,149 +282,70 @@ public final class SMCService: @unchecked Sendable {
     // MARK: - Multi-Generation Hardware Detection
 
     public enum SMCHardwareGeneration: String, Sendable {
-        case appleSiliconM2M3M4 = "Apple Silicon M2/M3/M4 (CHTE)"
+        case appleSiliconM2M3M4 = "Apple Silicon (CHTE)"
         case appleSiliconM1     = "Apple Silicon M1 (CH0B/CH0C)"
         case intelBCLM          = "Intel Mac (BCLM)"
-        case universalFallback  = "Universal Fallback"
+        case unsupported        = "Unsupported"
     }
 
-    /// Automatically probes the AppleSMC IOKit service to determine the active architecture
+    private var cachedGeneration: SMCHardwareGeneration?
+
+    /// Probes the SMC once to find which charge-control keys this Mac has.
     public var detectedHardwareGeneration: SMCHardwareGeneration {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = cachedGeneration { return cached }
+        let gen: SMCHardwareGeneration
         if getKeyInfo("CHTE") != nil {
-            return .appleSiliconM2M3M4
+            gen = .appleSiliconM2M3M4
         } else if getKeyInfo("CH0B") != nil {
-            return .appleSiliconM1
+            gen = .appleSiliconM1
         } else if getKeyInfo("BCLM") != nil {
-            return .intelBCLM
+            gen = .intelBCLM
+        } else {
+            gen = .unsupported
         }
-        return .appleSiliconM2M3M4
+        // Don't cache a failed probe (e.g. SMC not reachable yet), try again next time.
+        if gen != .unsupported { cachedGeneration = gen }
+        return gen
     }
 
-    // MARK: - Charge Limiter Hardware Matrix & AC Bypass
+    // MARK: - Charge Control
 
-    /// Controls battery charging cutoff across all Apple Silicon and Intel generations
+    /// Pauses or resumes battery charging. Requires root; returns false when the write is refused.
+    /// While paused on AC the Mac runs straight from the adapter.
     @discardableResult
-    public func setChargingInhibited(
-        _ inhibited: Bool,
-        limitPercentage: Int = 80,
-        forceDischarge: Bool = false
-    ) -> Bool {
-        let limitByte = UInt8(clamping: limitPercentage)
-        var success = false
-
-        let gen = detectedHardwareGeneration
-
-        switch gen {
+    public func setChargingInhibited(_ inhibited: Bool, limitPercentage: Int = 80) -> Bool {
+        switch detectedHardwareGeneration {
         case .appleSiliconM2M3M4:
-            // CHTE = 01 00 00 00 to inhibit, 00 00 00 00 to enable
-            let chteBytes: [UInt8] = inhibited ? [0x01, 0x00, 0x00, 0x00] : [0x00, 0x00, 0x00, 0x00]
-            if writeBytes("CHTE", bytes: chteBytes) { success = true }
-
-            // Force discharge on AC if requested (CHIE = 01)
-            if forceDischarge {
-                _ = writeUInt8("CHIE", value: 0x01)
-            } else if !inhibited {
-                _ = writeUInt8("CHIE", value: 0x00)
-            }
-
-            // MagSafe 3 LED sync (ACLC: 03 = Green / Bypass, 00 = Auto / Amber)
-            _ = writeUInt8("ACLC", value: inhibited ? 0x03 : 0x00)
+            let ok = writeBytes("CHTE", bytes: inhibited ? [0x01, 0x00, 0x00, 0x00] : [0x00, 0x00, 0x00, 0x00])
+            if ok { _ = writeUInt8("ACLC", value: inhibited ? 0x03 : 0x00) } // MagSafe LED: green while held
+            return ok
 
         case .appleSiliconM1:
-            // CH0B & CH0C = 02 to inhibit, 00 to enable
-            let m1Byte: UInt8 = inhibited ? 0x02 : 0x00
-            if writeUInt8("CH0B", value: m1Byte) { success = true }
-            if writeUInt8("CH0C", value: m1Byte) { success = true }
+            let value: UInt8 = inhibited ? 0x02 : 0x00
+            let b = writeUInt8("CH0B", value: value)
+            let c = writeUInt8("CH0C", value: value)
+            if b || c { _ = writeUInt8("ACLC", value: inhibited ? 0x03 : 0x00) }
+            return b || c
 
-            // Force discharge on AC if requested (CH0I = 01)
-            if forceDischarge {
-                _ = writeUInt8("CH0I", value: 0x01)
-            } else if !inhibited {
-                _ = writeUInt8("CH0I", value: 0x00)
-            }
+        case .intelBCLM:
+            // Intel SMC enforces the limit itself.
+            let value = UInt8(clamping: inhibited ? ChargeLimitConfig.clampLimit(limitPercentage) : 100)
+            let ok = writeUInt8("BCLM", value: value)
+            return ok
 
-            // MagSafe 3 LED sync
-            _ = writeUInt8("ACLC", value: inhibited ? 0x03 : 0x00)
-
-        case .intelBCLM, .universalFallback:
-            // Intel BCLM = limitByte (e.g. 80) to inhibit, 100 to enable
-            let bclmVal: UInt8 = inhibited ? limitByte : 100
-            if writeUInt8("BCLM", value: bclmVal) { success = true }
-            if writeUInt8("B0CM", value: bclmVal) { success = true }
+        case .unsupported:
+            return false
         }
-
-        // Also update legacy/fallback keys for maximum hardware compatibility
-        let inhibitBit: UInt8 = inhibited ? 0x01 : 0x00
-        let enableBit: UInt8 = inhibited ? 0x00 : 0x01
-        _ = writeUInt8("CHIB", value: inhibitBit)
-        _ = writeUInt8("CHCE", value: enableBit)
-
-        if success {
-            return true
-        }
-
-        // Apply via PowerHelperManager (wattbitd or notchkit helper daemon)
-        if PowerHelperManager.applyChargeLimit(inhibited ? limitPercentage : 100) {
-            return true
-        }
-
-        return invokePrivilegedHelper(inhibited: inhibited, limit: limitPercentage)
     }
 
-    /// Sets MagSafe 3 LED color (Green = 0x03, Amber/Auto = 0x00)
+    /// Sets the MagSafe 3 LED (green, or back to automatic). Requires root.
     @discardableResult
     public func setMagSafeLED(green: Bool) -> Bool {
         return writeUInt8("ACLC", value: green ? 0x03 : 0x00)
     }
 
-    /// Path where the privileged power helper is installed
-    public static let helperPath = "/Library/PrivilegedHelperTools/com.fluxbar.powerd"
-    public static let fallbackHelperPath = "/usr/local/bin/fluxbar-power-helper"
-    public static let legacyHelperPath = "/Library/PrivilegedHelperTools/com.notchkit.powerd"
-    public static let legacyFallbackHelperPath = "/usr/local/bin/notchkit-power-helper"
-    public static let wattbitdPath = "/Library/PrivilegedHelperTools/wattbitd"
-
-    public var isHelperInstalled: Bool {
-        PowerHelperManager.isInstalled
-    }
-
-    private func invokePrivilegedHelper(inhibited: Bool, limit: Int) -> Bool {
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
-            return true
-        }
-
-        let execPath: String
-        if FileManager.default.fileExists(atPath: Self.helperPath) {
-            execPath = Self.helperPath
-        } else if FileManager.default.fileExists(atPath: Self.fallbackHelperPath) {
-            execPath = Self.fallbackHelperPath
-        } else if FileManager.default.fileExists(atPath: Self.legacyHelperPath) {
-            execPath = Self.legacyHelperPath
-        } else if FileManager.default.fileExists(atPath: Self.legacyFallbackHelperPath) {
-            execPath = Self.legacyFallbackHelperPath
-        } else if FileManager.default.fileExists(atPath: Self.wattbitdPath) {
-            execPath = Self.wattbitdPath
-        } else {
-            return false
-        }
-
-        let action = inhibited ? "inhibit" : "resume"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: execPath)
-        process.arguments = [action, "\(limit)"]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3.0) {
-                if process.isRunning {
-                    process.terminate()
-                }
-            }
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
-    }
+    /// True when this process can write the SMC (i.e. running as root).
+    public var canWrite: Bool { geteuid() == 0 }
 }

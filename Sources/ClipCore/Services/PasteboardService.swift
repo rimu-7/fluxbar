@@ -14,7 +14,6 @@ public final class PasteboardService: ObservableObject {
     private var timer: Timer?
     private var cleanupTimer: Timer?
     private var lastChangeCount: Int
-    private var lastInternalChangeCount: Int = -1
 
     public var onClipRecorded: (@MainActor (ClipItem) -> Void)?
 
@@ -78,41 +77,49 @@ public final class PasteboardService: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.startMonitoring()
+                self?.resumePolling()
             }
         }
         sleepObservers = [sleepObs, wakeObs]
     }
 
-    public func startMonitoring(interval: TimeInterval = 0.4) {
+    private var pollInterval: TimeInterval = 0.5
+    private var isMonitoring = false
+
+    /// macOS has no "clipboard changed" notification, so we compare `changeCount` (a cheap integer read).
+    /// The generous tolerance lets the system batch this wake-up with others.
+    public func startMonitoring(interval: TimeInterval = 0.5) {
         stopMonitoring()
-        self.lastChangeCount = pasteboard.changeCount
+        pollInterval = interval
+        isMonitoring = true
+        lastChangeCount = pasteboard.changeCount
 
-        // 1. Initial cleanup at startup
         _ = try? dbManager.performCleanup()
+        resumePolling()
 
-        // 2. High-frequency pasteboard polling with Timer Coalescing for E-cores
-        let newTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.checkForChanges()
-            }
-        }
-        newTimer.tolerance = 0.2 // Timer coalescing allows scheduling on Apple Silicon E-cores
-        RunLoop.main.add(newTimer, forMode: .common)
-        self.timer = newTimer
-
-        // 3. Automated retention cleanup every 30 minutes (1800s)
-        let cleanup = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
+        // Retention cleanup every 30 minutes.
+        let cleanup = Timer(timeInterval: 1800, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 _ = try? self?.dbManager.performCleanup()
             }
         }
-        cleanup.tolerance = 60.0
+        cleanup.tolerance = 120
         RunLoop.main.add(cleanup, forMode: .common)
         self.cleanupTimer = cleanup
     }
 
+    private func resumePolling() {
+        guard isMonitoring, timer == nil else { return }
+        let poll = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkForChanges() }
+        }
+        poll.tolerance = pollInterval * 0.5
+        RunLoop.main.add(poll, forMode: .common)
+        self.timer = poll
+    }
+
     public func stopMonitoring() {
+        isMonitoring = false
         timer?.invalidate()
         timer = nil
         cleanupTimer?.invalidate()
@@ -122,66 +129,64 @@ public final class PasteboardService: ObservableObject {
     public func checkForChanges() {
         let currentChangeCount = pasteboard.changeCount
         guard currentChangeCount != lastChangeCount else { return }
-
-        // If this change was initiated internally by ClipSuite, record and update without loop
-        let isInternal = (currentChangeCount == lastInternalChangeCount)
         lastChangeCount = currentChangeCount
 
-        // Check active settings
         let settings = (try? dbManager.fetchSettings()) ?? .default
-        if settings.isPaused && !isInternal {
-            return
-        }
+        guard !settings.isPaused, settings.isClipboardEnabled else { return }
 
-        // Zero Secret Leakage: Privacy & Security Filter
-        // Automatically drop any NSPasteboard change containing concealed, transient, or auto-generated types
-        if Self.containsConcealedType(pasteboard: pasteboard) {
-            return
-        }
+        // Never record passwords or one-time codes from password managers.
+        if Self.containsConcealedType(pasteboard: pasteboard) { return }
 
-        // 1. Detect file URLs
+        // Look at the advertised types first. Requesting data the source app only *promises*
+        // (e.g. a TIFF preview of a Keynote slide) makes that app render it, so we only read what we keep.
+        let types = Set(pasteboard.types ?? [])
+
+        // 1. Files copied in Finder (file URLs only: a web link is text, not a file).
         var fileURLString: String?
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], let firstURL = urls.first {
-            fileURLString = firstURL.absoluteString
+        if types.contains(.fileURL),
+           let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           let first = urls.first {
+            fileURLString = first.absoluteString
         }
 
-        // 2. Detect Rich Text Format (RTF) data
-        let rtfData = pasteboard.data(forType: .rtf)
-
-        // 3. Detect HTML string
-        let htmlString = pasteboard.string(forType: .html)
-
-        // 4. Detect Image payloads (PNG, TIFF) and generate low-memory 80x80 thumbnail directly via ImageIO
-        var thumbnailFilename: String?
-        var imageData: Data?
-        if let tiff = pasteboard.data(forType: .tiff) {
-            imageData = tiff
-        } else if let png = pasteboard.data(forType: .png) {
-            imageData = png
-        }
-
-        if let rawImg = imageData {
-            thumbnailFilename = ThumbnailService.generateAndSaveThumbnail(from: rawImg, maxPixelSize: 80)
-        }
-
-        // 5. Plain text content
         var contentString = pasteboard.string(forType: .string)
-        if (contentString == nil || contentString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true), let fUrl = fileURLString {
-            contentString = URL(string: fUrl)?.lastPathComponent ?? fUrl
-        } else if (contentString == nil || contentString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true), let img = imageData {
-            contentString = "Image (\(img.count / 1024) KB)"
+        let hasText = !(contentString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+
+        var rtfData: Data?
+        var htmlString: String?
+        var imageData: Data?
+        var thumbnailFilename: String?
+
+        if fileURLString == nil && hasText {
+            // 2. Text, optionally with rich formatting.
+            if types.contains(.rtf) { rtfData = pasteboard.data(forType: .rtf) }
+            if types.contains(.html) { htmlString = pasteboard.string(forType: .html) }
+        } else if fileURLString == nil {
+            // 3. Pure images (screenshots, "Copy Image"). PNG is far smaller than TIFF.
+            if types.contains(.png) {
+                imageData = pasteboard.data(forType: .png)
+            } else if types.contains(.tiff) {
+                imageData = pasteboard.data(forType: .tiff)
+            }
+            if let img = imageData {
+                thumbnailFilename = ThumbnailService.generateAndSaveThumbnail(from: img, maxPixelSize: 80)
+                contentString = "Image (\(ByteCountFormatter.string(fromByteCount: Int64(img.count), countStyle: .file)))"
+            }
+        }
+
+        if !hasText, let fileURL = fileURLString {
+            contentString = URL(string: fileURL)?.lastPathComponent ?? fileURL
         }
 
         guard let string = contentString, !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
 
-        // 6. Determine format type
         let formatType: String
-        if imageData != nil {
-            formatType = "image"
-        } else if fileURLString != nil {
+        if fileURLString != nil {
             formatType = "file"
+        } else if imageData != nil {
+            formatType = "image"
         } else if rtfData != nil {
             formatType = "doc"
         } else if htmlString != nil {
@@ -192,23 +197,15 @@ public final class PasteboardService: ObservableObject {
             formatType = "text"
         }
 
-        // Capture frontmost application metadata
-        var bundleId: String?
-        var appName: String?
-        if !isInternal, let frontApp = NSWorkspace.shared.frontmostApplication {
-            bundleId = frontApp.bundleIdentifier
-            appName = frontApp.localizedName
-        }
-
-        let payloadData = imageData ?? rtfData
+        let frontApp = NSWorkspace.shared.frontmostApplication
 
         do {
             let saved = try dbManager.recordClip(
                 content: string,
-                sourceAppBundleId: bundleId,
-                sourceAppName: appName,
+                sourceAppBundleId: frontApp?.bundleIdentifier,
+                sourceAppName: frontApp?.localizedName,
                 formatType: formatType,
-                rtfData: payloadData,
+                rtfData: imageData ?? rtfData,
                 htmlContent: htmlString,
                 fileURL: fileURLString,
                 thumbnailFilename: thumbnailFilename
@@ -216,7 +213,7 @@ public final class PasteboardService: ObservableObject {
             onClipRecorded?(saved)
             NotificationCenter.default.post(name: .clipSuiteDidRecordClip, object: saved)
         } catch {
-            // Silently handle error or log
+            // Empty or unreadable clip: nothing to save.
         }
     }
 
@@ -224,40 +221,34 @@ public final class PasteboardService: ObservableObject {
     /// and updates the clip's updatedAt in SQLite.
     public func copyToPasteboard(item: ClipItem) {
         pasteboard.clearContents()
+        let payload = item.resolvedRtfData
 
-        // 1. Set file URL if present
-        if let fileStr = item.fileURL, let url = URL(string: fileStr) {
-            pasteboard.writeObjects([url as NSPasteboardWriting])
+        if item.formatType == "image", let image = payload {
+            // Images are stored as their original PNG or TIFF bytes.
+            let isPNG = image.starts(with: [0x89, 0x50, 0x4E, 0x47])
+            pasteboard.setData(image, forType: isPNG ? .png : .tiff)
+        } else {
+            if let fileStr = item.fileURL, let url = URL(string: fileStr), url.isFileURL {
+                pasteboard.writeObjects([url as NSURL])
+            }
+            pasteboard.setString(item.content, forType: .string)
+            if let rtf = payload {
+                pasteboard.setData(rtf, forType: .rtf)
+            }
+            if let html = item.htmlContent {
+                pasteboard.setString(html, forType: .html)
+            }
         }
 
-        // 2. Set plain text
-        pasteboard.setString(item.content, forType: .string)
+        // Our own write must not be recorded again as a new clip.
+        lastChangeCount = pasteboard.changeCount
 
-        // 3. Set RTF data if present (for Pages, Word, Notes, Google Docs, Slack, etc.)
-        if let rtf = item.resolvedRtfData {
-            pasteboard.setData(rtf, forType: .rtf)
+        // Move it to the top of the history.
+        if let id = item.id {
+            try? dbManager.touchClip(id: id)
+        } else {
+            _ = try? dbManager.recordClip(content: item.content, sourceAppName: item.sourceAppName, formatType: item.formatType)
         }
-
-        // 4. Set HTML data if present
-        if let html = item.htmlContent {
-            pasteboard.setString(html, forType: .html)
-        }
-
-        // Track internal change count
-        let newCount = pasteboard.changeCount
-        lastInternalChangeCount = newCount
-        lastChangeCount = newCount
-
-        // Update database record timestamp and copy count
-        _ = try? dbManager.recordClip(
-            content: item.content,
-            sourceAppBundleId: item.sourceAppBundleId,
-            sourceAppName: item.sourceAppName,
-            formatType: item.formatType,
-            rtfData: item.rtfData,
-            htmlContent: item.htmlContent,
-            fileURL: item.fileURL
-        )
     }
 
     public func copyToPasteboard(content: String, sourceAppBundleId: String? = nil, sourceAppName: String? = nil) {

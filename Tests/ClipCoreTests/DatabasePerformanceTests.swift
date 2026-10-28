@@ -344,4 +344,27 @@ final class DatabasePerformanceTests: XCTestCase {
         let byHash = try dbManager.fetchClip(hash: item.contentHash)
         XCTAssertEqual(byHash?.id, item.id)
     }
+
+    public func testPagingIsRecentFirstWithoutDuplicates() throws {
+        var ids: [Int64] = []
+        for i in 0..<30 {
+            ids.append(try dbManager.recordClip(content: "clip number \(i)").id!)
+            Thread.sleep(forTimeInterval: 0.002) // distinct timestamps
+        }
+        try dbManager.togglePin(id: ids[0])
+        Thread.sleep(forTimeInterval: 0.002)
+        // Re-using an old clip must move it to the top of the unpinned list.
+        try dbManager.touchClip(id: ids[1])
+
+        var seen: [Int64] = []
+        var page = try dbManager.fetchNextPage(after: nil, limit: 7)
+        while !page.isEmpty {
+            seen.append(contentsOf: page.compactMap(\.id))
+            page = try dbManager.fetchNextPage(after: page.last, limit: 7)
+        }
+        XCTAssertEqual(seen.count, 30)
+        XCTAssertEqual(Set(seen).count, 30, "Pages must not repeat rows")
+        XCTAssertEqual(seen.first, ids[0], "Pinned first")
+        XCTAssertEqual(seen.dropFirst().first, ids[1], "Most recently used next")
+    }
 }

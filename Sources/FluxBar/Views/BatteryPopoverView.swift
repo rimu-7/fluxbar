@@ -1247,13 +1247,13 @@ public struct BatteryPopoverView: View {
                     .foregroundColor(batteryVM.isHelperInstalled ? Color.green : Color.orange)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(batteryVM.isHelperInstalled ? "Kernel SMC Bypass: Active" : "Touch ID Authorization Required")
+                    Text(batteryVM.isHelperInstalled ? "Battery Helper Installed" : "Battery Helper Needed")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.primary)
 
                     Text(batteryVM.isHelperInstalled
-                         ? "Direct Apple Silicon hardware SMC charge cutoff is enforced."
-                         : "Touch ID or admin authorization enables native SMC charge inhibition.")
+                         ? "The limit is enforced in the background, even when FluxBar is closed."
+                         : "Install once (password or Touch ID) so FluxBar can pause charging at your limit.")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }
@@ -1264,7 +1264,7 @@ public struct BatteryPopoverView: View {
                     Button(action: {
                         batteryVM.authorizeHelper()
                     }) {
-                        Text(batteryVM.isAuthorizingHelper ? "Authorizing..." : "Authorize")
+                        Text(batteryVM.isAuthorizingHelper ? "Installing…" : "Install")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundColor(.white)
                             .padding(.horizontal, 12)
@@ -1276,13 +1276,18 @@ public struct BatteryPopoverView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(batteryVM.isAuthorizingHelper)
+                } else {
+                    Button("Remove") { batteryVM.uninstallHelper() }
+                        .controlSize(.small)
+                        .disabled(batteryVM.isAuthorizingHelper)
+                        .help("Uninstall the helper and restore normal charging")
                 }
             }
 
             if let message = batteryVM.statusMessage {
                 Text(message)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(message.contains("success") ? .green : (message.contains("Limit reached") ? .teal : .orange))
+                    .foregroundColor(batteryVM.isHelperInstalled ? .secondary : .orange)
                     .padding(.top, 2)
             }
         }

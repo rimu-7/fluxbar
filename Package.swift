@@ -11,9 +11,7 @@ let package = Package(
         .library(name: "NetCore", targets: ["NetCore"]),
         .library(name: "PowerCore", targets: ["PowerCore"]),
         .executable(name: "FluxBar", targets: ["FluxBar"]),
-        .executable(name: "NotchKit", targets: ["FluxBar"]),
         .executable(name: "flux", targets: ["flux"]),
-        .executable(name: "nkit", targets: ["flux"]),
         .executable(name: "clip", targets: ["clip"])
     ],
     dependencies: [
@@ -64,10 +62,7 @@ let package = Package(
             dependencies: [
                 "PowerCore"
             ],
-            path: "Sources/PowerDaemon",
-            resources: [
-                .copy("com.fluxbar.powerd.plist")
-            ]
+            path: "Sources/PowerDaemon"
         ),
         .executableTarget(
             name: "clip",

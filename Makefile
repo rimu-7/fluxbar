@@ -1,7 +1,11 @@
+# On a normal Mac with Xcode or working Command Line Tools, plain `swift` works and these are ignored.
+# This machine's CLT ship a mismatched PackageDescription, so fall back to the patched toolchain if present.
+ifneq ($(wildcard /tmp/test_patch/usr/bin/swiftc),)
 export SWIFT_EXEC ?= /tmp/test_patch/usr/bin/swiftc
 export SWIFT_EXEC_MANIFEST ?= $(PWD)/scripts/swiftc-manifest
+endif
 
-.PHONY: all build test run run-bar install-cli clean
+.PHONY: all build test run app dmg install uninstall icon clean
 
 all: build
 
@@ -14,24 +18,22 @@ test:
 run: build
 	.build/debug/FluxBar
 
-run-bar: run
+# dist/FluxBar.app + FluxBar.zip + FluxBar.dmg
+app:
+	./scripts/build-app.sh
 
-install-cli: build
-	mkdir -p /usr/local/bin 2>/dev/null || true
-	cp .build/debug/flux /usr/local/bin/flux 2>/dev/null || cp .build/debug/flux $(HOME)/.local/bin/flux
-	cp .build/debug/nkit /usr/local/bin/nkit 2>/dev/null || cp .build/debug/nkit $(HOME)/.local/bin/nkit
-	cp .build/debug/clip /usr/local/bin/clip 2>/dev/null || cp .build/debug/clip $(HOME)/.local/bin/clip
-	cp .build/debug/com.fluxbar.powerd /usr/local/bin/com.fluxbar.powerd 2>/dev/null || true
-	@echo "✅ Installed 'flux', 'nkit', and 'clip' CLI utilities successfully."
+dmg: app
 
-install-helper: build
-	@echo "Installing FluxBar privileged power daemon (com.fluxbar.powerd)..."
-	sudo mkdir -p /Library/PrivilegedHelperTools /usr/local/bin
-	sudo cp -f .build/debug/com.fluxbar.powerd /Library/PrivilegedHelperTools/com.fluxbar.powerd
-	sudo chown root:wheel /Library/PrivilegedHelperTools/com.fluxbar.powerd
-	sudo chmod 755 /Library/PrivilegedHelperTools/com.fluxbar.powerd
-	sudo cp -f /Library/PrivilegedHelperTools/com.fluxbar.powerd /usr/local/bin/fluxbar-power-helper
-	@echo "✅ Installed and authorized com.fluxbar.powerd successfully!"
+# Build and install locally exactly like the curl installer would.
+install: app
+	FLUXBAR_ZIP=dist/FluxBar.zip ./scripts/install.sh
+
+uninstall:
+	./scripts/install.sh --uninstall
+
+icon:
+	swift scripts/make-icon.swift Resources/AppIcon.icns
 
 clean:
 	swift package clean
+	rm -rf dist

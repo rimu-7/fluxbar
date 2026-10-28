@@ -1,143 +1,124 @@
 import Foundation
-import AppKit
-import ServiceManagement
 
-/// Manages privileged helper installation and hardware charge limiting execution
+/// Installs, removes and talks to the root charge-limit daemon (`com.fluxbar.powerd`).
+///
+/// Design: the daemon runs as a LaunchDaemon and is the only thing that writes the SMC.
+/// Everyone else just saves `ChargeLimitConfig`, which the daemon watches.
+/// This needs no code signing team, no XPC, and keeps working when the app is quit.
 public enum PowerHelperManager {
-    public static let wattbitdPath = "/Library/PrivilegedHelperTools/wattbitd"
-    public static let helperIdentifier = "com.fluxbar.powerd"
-    public static let legacyHelperIdentifier = "com.notchkit.powerd"
-    public static let destinationPath = "/Library/PrivilegedHelperTools/\(helperIdentifier)"
-    public static let legacyDestinationPath = "/Library/PrivilegedHelperTools/\(legacyHelperIdentifier)"
-    public static let fallbackBinPath = "/usr/local/bin/fluxbar-power-helper"
-    public static let legacyFallbackBinPath = "/usr/local/bin/notchkit-power-helper"
+    public static let label = "com.fluxbar.powerd"
+    public static let installedBinaryPath = "/Library/PrivilegedHelperTools/com.fluxbar.powerd"
+    public static let launchDaemonPlistPath = "/Library/LaunchDaemons/com.fluxbar.powerd.plist"
+
+    /// Files left behind by older builds. Removed on install/uninstall.
+    public static let legacyPaths = [
+        "/usr/local/bin/fluxbar-power-helper",
+        "/usr/local/bin/notchkit-power-helper",
+        "/usr/local/bin/com.fluxbar.powerd",
+        "/Library/PrivilegedHelperTools/com.notchkit.powerd"
+    ]
 
     public static var isInstalled: Bool {
-        if #available(macOS 13.0, *) {
-            let service = SMAppService.daemon(plistName: "\(helperIdentifier).plist")
-            if service.status == .enabled {
-                return true
-            }
-        }
-        if FileManager.default.fileExists(atPath: wattbitdPath) {
-            return true
-        }
-        if FileManager.default.fileExists(atPath: destinationPath) || FileManager.default.fileExists(atPath: legacyDestinationPath) {
-            return true
-        }
-        if FileManager.default.fileExists(atPath: fallbackBinPath) || FileManager.default.fileExists(atPath: legacyFallbackBinPath) {
-            return true
-        }
-        return false
+        let fm = FileManager.default
+        return fm.fileExists(atPath: installedBinaryPath)
+            && fm.fileExists(atPath: launchDaemonPlistPath)
+            && fm.fileExists(atPath: ChargeLimitConfig.directoryURL.path)
     }
 
-    public static func findBuiltDaemonBinary() -> String? {
-        let candidates = [
-            Bundle.main.bundlePath + "/Contents/MacOS/com.fluxbar.powerd",
-            Bundle.main.bundlePath + "/Contents/MacOS/fluxbar-power-helper",
-            "/usr/local/bin/com.fluxbar.powerd",
-            "/usr/local/bin/fluxbar-power-helper",
-            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("com.fluxbar.powerd").path,
-            FileManager.default.currentDirectoryPath + "/.build/debug/com.fluxbar.powerd",
-            FileManager.default.currentDirectoryPath + "/.build/release/com.fluxbar.powerd",
-            Bundle.main.bundlePath + "/Contents/MacOS/com.notchkit.powerd",
-            "/usr/local/bin/com.notchkit.powerd",
-            FileManager.default.currentDirectoryPath + "/.build/debug/com.notchkit.powerd"
-        ]
-        return candidates.first(where: { FileManager.default.fileExists(atPath: $0) })
+    /// True when the current user may change the limit without a password (admin group, helper installed).
+    public static var canWriteConfig: Bool {
+        FileManager.default.isWritableFile(atPath: ChargeLimitConfig.directoryURL.path)
     }
 
-    /// Set charge limit percentage on hardware asynchronously (non-blocking)
-    @discardableResult
-    public static func applyChargeLimit(_ percentage: Int) -> Bool {
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
-            return true
-        }
+    // MARK: - Settings
 
-        let clamped = max(50, min(100, percentage))
-        let arg = (clamped >= 100) ? "disable" : "\(clamped)"
-
-        DispatchQueue.global(qos: .utility).async {
-            // 1. If wattbitd is installed, invoke it
-            if FileManager.default.fileExists(atPath: wattbitdPath) {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: wattbitdPath)
-                process.arguments = ["limit", arg]
-                process.standardOutput = FileHandle.nullDevice
-                process.standardError = FileHandle.nullDevice
-                do {
-                    try process.run()
-                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3.0) {
-                        if process.isRunning { process.terminate() }
-                    }
-                    process.waitUntilExit()
-                } catch {}
-            }
-
-            // 2. Try fluxbar-power-helper or legacy helper if available
-            if let helperPath = [destinationPath, fallbackBinPath, legacyDestinationPath, legacyFallbackBinPath].first(where: { FileManager.default.fileExists(atPath: $0) }) {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: helperPath)
-                process.arguments = ["limit", arg]
-                process.standardOutput = FileHandle.nullDevice
-                process.standardError = FileHandle.nullDevice
-                do {
-                    try process.run()
-                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3.0) {
-                        if process.isRunning { process.terminate() }
-                    }
-                    process.waitUntilExit()
-                } catch {}
-            }
-        }
-
-        return true
+    public static func currentConfig() -> ChargeLimitConfig {
+        ChargeLimitConfig.load() ?? .default
     }
 
-    /// Authorize hardware charge limiting via standard macOS Touch ID / Password prompt
-    @MainActor
-    public static func requestHelperInstallation() async -> Bool {
-        if #available(macOS 13.0, *) {
-            let service = SMAppService.daemon(plistName: "\(helperIdentifier).plist")
+    public static func daemonStatus() -> PowerDaemonStatus? {
+        PowerDaemonStatus.load()
+    }
+
+    /// Saves new settings for the daemon. Throws if the helper is not installed.
+    public static func save(_ config: ChargeLimitConfig) throws {
+        guard isInstalled else { throw HelperError.notInstalled }
+        try config.save()
+    }
+
+    // MARK: - Locating the daemon binary
+
+    /// Finds the daemon binary shipped next to the running app or CLI.
+    public static func bundledDaemonPath() -> String? {
+        let fm = FileManager.default
+        var candidates: [String] = []
+
+        // Inside FluxBar.app/Contents/MacOS (app, or CLI symlinked into PATH)
+        let exec = (Bundle.main.executablePath ?? CommandLine.arguments[0])
+        let resolved = URL(fileURLWithPath: exec).resolvingSymlinksInPath()
+        candidates.append(resolved.deletingLastPathComponent().appendingPathComponent(label).path)
+        candidates.append(Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/\(label)").path)
+
+        // Development builds
+        let cwd = fm.currentDirectoryPath
+        candidates.append("\(cwd)/.build/release/\(label)")
+        candidates.append("\(cwd)/.build/debug/\(label)")
+
+        return candidates.first { fm.isExecutableFile(atPath: $0) }
+    }
+
+    // MARK: - Install / Uninstall (GUI: one password / Touch ID prompt)
+
+    /// Installs the daemon through the standard macOS administrator prompt.
+    /// Runs `osascript` in a child process so the UI never blocks.
+    public static func installWithAdminPrompt(config: ChargeLimitConfig) async throws {
+        guard let daemon = bundledDaemonPath() else { throw HelperError.daemonBinaryMissing }
+        let args = "install --limit \(config.limit) --enabled \(config.isEnabled ? "true" : "false")"
+        try await runWithAdminPrompt(executable: daemon, arguments: args)
+    }
+
+    public static func uninstallWithAdminPrompt() async throws {
+        let daemon = FileManager.default.isExecutableFile(atPath: installedBinaryPath) ? installedBinaryPath : bundledDaemonPath()
+        guard let daemon else { throw HelperError.daemonBinaryMissing }
+        try await runWithAdminPrompt(executable: daemon, arguments: "uninstall")
+    }
+
+    private static func runWithAdminPrompt(executable: String, arguments: String) async throws {
+        let escaped = executable
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = "do shell script (quoted form of \"\(escaped)\") & \" \(arguments)\" with prompt \"FluxBar needs permission to manage battery charging.\" with administrator privileges"
+
+        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", script]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
             do {
-                try service.register()
-                _ = applyChargeLimit(80)
-                return true
+                try process.run()
             } catch {
-                // Fallback to administrator execution if running outside .app bundle
+                continuation.resume(throwing: error)
             }
         }
+        guard status == 0 else { throw HelperError.cancelledOrFailed }
+    }
 
-        let script: String
-        if let bin = findBuiltDaemonBinary() {
-            script = """
-            mkdir -p /Library/PrivilegedHelperTools /usr/local/bin
-            cp -f "\(bin)" "\(destinationPath)"
-            chown root:wheel "\(destinationPath)"
-            chmod 755 "\(destinationPath)"
-            cp -f "\(destinationPath)" "\(fallbackBinPath)"
-            "\(destinationPath)" limit 80
-            """
-        } else if FileManager.default.fileExists(atPath: wattbitdPath) {
-            script = "\(wattbitdPath) limit 80"
-        } else {
-            script = """
-            mkdir -p /Library/PrivilegedHelperTools /usr/local/bin
-            touch "\(destinationPath)"
-            chmod 755 "\(destinationPath)"
-            """
-        }
+    public enum HelperError: LocalizedError {
+        case notInstalled
+        case daemonBinaryMissing
+        case cancelledOrFailed
 
-        let appleScriptSource = "do shell script \"\(script.replacingOccurrences(of: "\"", with: "\\\""))\" with administrator privileges"
-        var errorDict: NSDictionary?
-        if let appleScript = NSAppleScript(source: appleScriptSource) {
-            _ = appleScript.executeAndReturnError(&errorDict)
-            let success = (errorDict == nil)
-            if success {
-                _ = applyChargeLimit(80)
+        public var errorDescription: String? {
+            switch self {
+            case .notInstalled:
+                return "The battery helper is not installed. Run 'flux power install' or use Install in the app."
+            case .daemonBinaryMissing:
+                return "Could not find com.fluxbar.powerd next to this app. Reinstall FluxBar."
+            case .cancelledOrFailed:
+                return "Authorization was cancelled or the install failed."
             }
-            return success
         }
-        return false
     }
 }

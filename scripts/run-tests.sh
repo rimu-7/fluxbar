@@ -4,6 +4,12 @@ set -e
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$DIR"
 
+# Normal setups (Xcode or working Command Line Tools): just use SwiftPM.
+# The custom runner below only exists for a machine whose toolchain needs the /tmp/test_patch workaround.
+if [ ! -x /tmp/test_patch/usr/bin/swiftc ]; then
+  exec swift test
+fi
+
 SWIFT_EXEC="${SWIFT_EXEC:-/tmp/test_patch/usr/bin/swiftc}"
 SWIFT_EXEC_MANIFEST="${SWIFT_EXEC_MANIFEST:-$DIR/scripts/swiftc-manifest}"
 
@@ -112,7 +118,8 @@ let clipMethods = [
     ("testCryptoKitAESGCMEncryptionAndKeychainKeyRoundtrip", "testCryptoKitAESGCMEncryptionAndKeychainKeyRoundtripAndReturnError:"),
     ("testClipBlobManagerExternalizationAndEncryption", "testClipBlobManagerExternalizationAndEncryptionAndReturnError:"),
     ("testConcealedTypeZeroSecretLeakageSanitizer", "testConcealedTypeZeroSecretLeakageSanitizerAndReturnError:"),
-    ("testFetchClipByIdAndHash", "testFetchClipByIdAndHashAndReturnError:")
+    ("testFetchClipByIdAndHash", "testFetchClipByIdAndHashAndReturnError:"),
+    ("testPagingIsRecentFirstWithoutDuplicates", "testPagingIsRecentFirstWithoutDuplicatesAndReturnError:")
 ]
 
 let netMethods = [
@@ -128,7 +135,11 @@ let powerMethods = [
     ("testChargeLimiterHysteresisLogic", "testChargeLimiterHysteresisLogicAndReturnError:"),
     ("testPowerSettingsPresets", "testPowerSettingsPresetsAndReturnError:"),
     ("testThermalCutoutGuard", "testThermalCutoutGuardAndReturnError:"),
-    ("testSMCHardwareGenerationMatrix", "testSMCHardwareGenerationMatrixAndReturnError:")
+    ("testSMCHardwareGenerationMatrix", "testSMCHardwareGenerationMatrixAndReturnError:"),
+    ("testActuatorCalledOnlyOnChangeAndRetriedOnFailure", "testActuatorCalledOnlyOnChangeAndRetriedOnFailureAndReturnError:"),
+    ("testBelowLimitNeverPausesCharging", "testBelowLimitNeverPausesChargingAndReturnError:"),
+    ("testThermalPauseResumesWhenCool", "testThermalPauseResumesWhenCoolAndReturnError:"),
+    ("testChargeLimitConfigRoundTripAndClamping", "testChargeLimitConfigRoundTripAndClampingAndReturnError:")
 ]
 
 let startTotal = Date()
