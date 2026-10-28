@@ -5,6 +5,7 @@ import NetCore
 
 public struct SettingsView: View {
     @ObservedObject var viewModel: ClipBarViewModel
+    @ObservedObject private var updater = GitHubUpdater.shared
 
     @State private var startAtLogin: Bool = LaunchAtLoginHelper.isEnabled
     @State private var isPaused: Bool
@@ -81,16 +82,19 @@ public struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    // 1. NOTCHKIT TOOLS & MENU BAR VISIBILITY
+                    // 1. TOOLS & MENU BAR VISIBILITY
                     toolsSection
 
                     // 2. GENERAL PREFERENCES SECTION
                     generalSection
 
-                    // 3. STORAGE & RETENTION SECTION
+                    // 3. SOFTWARE UPDATES
+                    updatesSection
+
+                    // 4. STORAGE & RETENTION SECTION
                     storageSection
 
-                    // 4. DANGER ZONE SECTION
+                    // 5. DANGER ZONE SECTION
                     dangerZoneSection
                 }
                 .padding(14)
@@ -131,7 +135,7 @@ public struct SettingsView: View {
                 Spacer()
             }
 
-            Text("NotchKit Settings")
+            Text("FluxBar Settings")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.primary)
         }
@@ -144,7 +148,7 @@ public struct SettingsView: View {
 
     private var toolsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("NOTCHKIT TOOLS & MENU BAR")
+            Text("TOOLS & MENU BAR")
                 .font(.system(size: 10, weight: .bold))
                 .tracking(0.6)
                 .foregroundColor(.secondary.opacity(0.8))
@@ -300,7 +304,7 @@ public struct SettingsView: View {
                         Text("Start at Login")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.primary)
-                        Text("Launch NotchKit automatically when your Mac turns on.")
+                        Text("Launch FluxBar automatically when you log in.")
                             .font(.system(size: 10.5))
                             .foregroundColor(.secondary)
                     }
@@ -394,6 +398,92 @@ public struct SettingsView: View {
                     .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
             )
         }
+    }
+
+    // MARK: - Software Updates Section
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("SOFTWARE UPDATES")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.6)
+                .foregroundColor(.secondary.opacity(0.8))
+                .padding(.leading, 2)
+
+            VStack(spacing: 0) {
+                // 1. Automatic checks
+                HStack(spacing: 11) {
+                    Image(systemName: "arrow.down.app.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.indigo)
+                        .frame(width: 26, height: 26)
+                        .background(Color.indigo.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Check for Updates Automatically")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.primary)
+                        Text("Once a day, FluxBar asks GitHub for the latest version. Nothing else is sent.")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Toggle("", isOn: $updater.automaticallyChecks)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
+                .padding(.vertical, 8)
+
+                Divider().opacity(0.15).padding(.leading, 37)
+
+                // 2. Version + manual check
+                HStack(spacing: 11) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.gray)
+                        .frame(width: 26, height: 26)
+                        .background(Color.gray.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("FluxBar \(updater.currentVersion)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.primary)
+                        Text(lastCheckedText)
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Button(updater.state == .checking ? "Checking…" : "Check Now") {
+                        updater.checkForUpdates(userInitiated: true)
+                    }
+                    .controlSize(.small)
+                    .disabled(updater.state == .checking)
+                }
+                .padding(.vertical, 8)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.045))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
+        }
+    }
+
+    private var lastCheckedText: String {
+        guard let date = updater.lastChecked else { return "Not checked yet" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return "Last checked " + formatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - Storage & Retention Section
@@ -1012,14 +1102,14 @@ public struct SettingsView: View {
 
                 Divider().opacity(0.15)
 
-                // 4. Quit NotchKit
+                // 4. Quit FluxBar
                 Button(action: { NSApplication.shared.terminate(nil) }) {
                     HStack(spacing: 9) {
                         Image(systemName: "power")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                             .frame(width: 20)
-                        Text("Quit NotchKit")
+                        Text("Quit FluxBar")
                             .foregroundColor(.secondary)
                             .font(.system(size: 12, weight: .medium))
                         Spacer()

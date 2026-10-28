@@ -46,7 +46,7 @@ make install  # builds FluxBar.app and installs it like the curl installer
 - **Keep it light.** FluxBar runs all day. Avoid timers and polling where an event or notification exists,
   and stop work when nothing is on screen. Mention the impact in your PR if you touch anything that runs in the background.
 - **Keep it native.** Prefer AppKit/SwiftUI and system frameworks over new dependencies.
-- **Privacy.** FluxBar makes no network requests. Please keep it that way.
+- **Privacy.** The only network request is the daily update check to GitHub Releases (`Sources/ClipCore/Update`). Please keep it that way: no analytics, no telemetry.
 - **Battery helper changes need extra care.** It runs as root. Keep it small, validate all input,
   and make sure it always restores normal charging when stopped or removed.
 - **Add a test** for logic changes in `ClipCore`, `NetCore` or `PowerCore` (see `Tests/`).
@@ -66,5 +66,8 @@ CI builds and tests every PR.
 1. Bump `version` in `Sources/ClipCore/FluxBarInfo.swift`.
 2. Commit, then tag and push: `git tag v1.2.0 && git push origin v1.2.0`.
 3. GitHub Actions builds the universal app and publishes `FluxBar.zip` and `FluxBar.dmg`.
+   Installed copies pick it up within a day through the in-app updater.
+   Keep the asset names `FluxBar.zip` and `FluxBar.zip.sha256`: the installer and the updater look for them.
+   A tag with a suffix (`v1.3.0-beta.1`) is published as a pre-release, which the updater skips.
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).

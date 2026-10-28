@@ -1,7 +1,9 @@
 name: Release
 
-# Push a tag like v1.2.0 (must match FluxBarInfo.version) to publish
-# FluxBar.zip (used by the curl installer) and FluxBar.dmg to GitHub Releases.
+# Push a tag like v1.2.1 (must match FluxBarInfo.version) to publish to GitHub Releases:
+#   FluxBar.zip + .sha256   used by the curl installer and the in-app updater (keep these names)
+#   FluxBar.dmg + .sha256   for manual installs
+# Tags with a suffix (v1.3.0-beta.1) are published as pre-releases, which the updater ignores.
 on:
   push:
     tags: ["v*"]
@@ -10,9 +12,14 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-15
+    timeout-minutes: 45
     env:
       HAS_SIGNING_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
     steps:
@@ -24,7 +31,17 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/ClipCore/FluxBarInfo.swift)"
-          [ "v$VERSION" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME != version $VERSION"; exit 1; }
+          [ "v$VERSION" = "$GITHUB_REF_NAME" ] || { echo "::error::Tag $GITHUB_REF_NAME doesn't match FluxBarInfo.version $VERSION"; exit 1; }
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
 
       - name: Test
         run: swift test
@@ -47,6 +64,7 @@ jobs:
           security unlock-keychain -p ci "$KEYCHAIN"
           echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" login.keychain
           xcrun notarytool store-credentials fluxbar --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
@@ -58,18 +76,46 @@ jobs:
           SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
         run: scripts/build-app.sh
 
+      - name: Verify the release files
+        run: |
+          set -euo pipefail
+          APP=dist/FluxBar.app
+          VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/ClipCore/FluxBarInfo.swift)"
+
+          codesign --verify --deep --strict "$APP"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VERSION"
+          for bin in FluxBar flux clip com.fluxbar.powerd; do
+            ARCHS="$(lipo -archs "$APP/Contents/MacOS/$bin")"
+            [[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || { echo "::error::$bin is not universal ($ARCHS)"; exit 1; }
+          done
+
+          cd dist
+          shasum -a 256 -c FluxBar.zip.sha256
+          shasum -a 256 -c FluxBar.dmg.sha256
+          hdiutil verify FluxBar.dmg
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/FluxBar.zip dist/FluxBar.zip.sha256 dist/FluxBar.dmg dist/FluxBar.dmg.sha256 \
-            --title "FluxBar ${GITHUB_REF_NAME#v}" --generate-notes
+          set -euo pipefail
+          FILES=(dist/FluxBar.zip dist/FluxBar.zip.sha256 dist/FluxBar.dmg dist/FluxBar.dmg.sha256)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # Re-run of the same tag: replace the files, keep the notes.
+            gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --clobber
+          else
+            PRERELEASE=""
+            if [[ "$GITHUB_REF_NAME" == *-* ]]; then PRERELEASE="--prerelease"; fi
+            # shellcheck disable=SC2086  # PRERELEASE is intentionally unquoted (empty or one flag)
+            gh release create "$GITHUB_REF_NAME" "${FILES[@]}" \
+              --title "FluxBar ${GITHUB_REF_NAME#v}" --generate-notes --verify-tag $PRERELEASE
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FluxBar
+          name: FluxBar-${{ github.ref_name }}
           path: |
             dist/FluxBar.zip
             dist/FluxBar.dmg
+          if-no-files-found: error

@@ -38,6 +38,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             speedViewModel: SpeedMeterViewModel.shared,
             batteryViewModel: BatteryViewModel.shared
         )
+
+        // Daily, silent update check (only interrupts when a new version exists).
+        GitHubUpdater.shared.start()
+
+        // `flux update` asks us to quit so it can replace the app (it relaunches us afterwards).
+        DistributedNotificationCenter.default().addObserver(
+            forName: UpdateEngine.quitForUpdateNotification, object: nil, queue: .main
+        ) { _ in
+            Task { @MainActor in NSApp.terminate(nil) }
+        }
     }
 
     /// Double-clicking FluxBar in Finder / Launchpad while it's running opens the popover.

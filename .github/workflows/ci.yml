@@ -3,14 +3,113 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/pull_request_template.md"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/pull_request_template.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same branch or PR cancels the run that's still going.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    name: Build and test
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
       - name: Build
-        run: swift build -c release
+        run: swift build --build-tests
+
       - name: Test
-        run: swift test
+        run: swift test --skip-build
+
+  package:
+    name: Package app
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build FluxBar.app, zip and dmg
+        run: scripts/build-app.sh
+
+      # Everything the curl installer and the in-app updater rely on.
+      - name: Verify the app bundle
+        run: |
+          set -euo pipefail
+          APP=dist/FluxBar.app
+          VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/ClipCore/FluxBarInfo.swift)"
+
+          codesign --verify --deep --strict "$APP"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.fluxbar.FluxBar"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VERSION"
+          for bin in FluxBar flux clip com.fluxbar.powerd; do test -x "$APP/Contents/MacOS/$bin"; done
+          test "$("$APP/Contents/MacOS/flux" --version)" = "$VERSION"
+
+          cd dist
+          shasum -a 256 -c FluxBar.zip.sha256
+          shasum -a 256 -c FluxBar.dmg.sha256
+          hdiutil verify FluxBar.dmg
+          ditto -x -k FluxBar.zip unzipped
+          codesign --verify --deep --strict unzipped/FluxBar.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FluxBar-${{ github.sha }}
+          path: |
+            dist/FluxBar.zip
+            dist/FluxBar.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  scripts:
+    name: Check shell scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax
+        run: for f in scripts/*.sh; do bash -n "$f"; done
+
+      - name: ShellCheck
+        run: shellcheck --severity=error scripts/*.sh

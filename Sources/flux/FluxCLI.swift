@@ -13,7 +13,8 @@ struct FluxCLI: ParsableCommand {
         subcommands: [
             ClipCommand.self,
             PowerCommand.self,
-            NetCommand.self
+            NetCommand.self,
+            UpdateCommand.self
         ]
     )
 }
@@ -557,5 +558,99 @@ struct NetLiveCommand: ParsableCommand {
             print("↑ \(upFormatted.padding(toLength: 12, withPad: " ", startingAt: 0))  ↓ \(downFormatted)")
             fflush(stdout)
         }
+    }
+}
+
+// =============================================================================
+// MARK: - UPDATE (`flux update`)
+// =============================================================================
+
+struct UpdateCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "update",
+        abstract: "Update FluxBar to the latest release from GitHub",
+        discussion: """
+        Checks GitHub for a newer FluxBar, then downloads it, verifies its checksum and code signature,
+        and replaces the FluxBar.app that contains this command. A running FluxBar is restarted.
+        Your clipboard history and settings are kept.
+        """
+    )
+
+    @Flag(name: .long, help: "Only check; don't install")
+    var check = false
+
+    @Flag(name: [.short, .long], help: "Install without asking")
+    var yes = false
+
+    func run() throws {
+        let appURL = UpdateEngine.installedAppURL()
+        let installed = appURL.flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
+        let current = installed ?? FluxBarInfo.version
+
+        print("Checking for updates…")
+        guard let update = try waitFor({ try await UpdateEngine.checkForUpdate(currentVersion: current) }) else {
+            print("✅ FluxBar \(current) is the latest version.")
+            return
+        }
+        print("FluxBar \(update.version) is available (you have \(current)).")
+        print("Release notes: \(update.release.htmlURL.absoluteString)")
+        if check { return }
+
+        guard let appURL else {
+            throw CLIError("This flux isn't inside FluxBar.app. Update with the installer instead:\n  curl -fsSL https://raw.githubusercontent.com/\(UpdateEngine.repository)/main/scripts/install.sh | bash")
+        }
+        if let blocker = UpdateEngine.installBlocker(for: appURL) { throw CLIError(blocker) }
+
+        if !yes {
+            guard isatty(STDIN_FILENO) != 0 else { throw CLIError("Run 'flux update --yes' to install without a prompt.") }
+            print("Install it now? [Y/n] ", terminator: "")
+            let answer = (readLine() ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+            guard answer.isEmpty || answer == "y" || answer == "yes" else { print("Cancelled."); return }
+        }
+
+        let bundleID = Bundle(url: appURL)?.bundleIdentifier ?? FluxBarInfo.bundleIdentifier
+        let interactive = isatty(STDOUT_FILENO) != 0
+        let prepared = try waitFor {
+            try await UpdateEngine.prepare(update, expectedBundleID: bundleID) { fraction in
+                guard interactive else { return }
+                let width = 30, filled = Int(fraction * Double(width))
+                let bar = String(repeating: "#", count: filled) + String(repeating: "-", count: width - filled)
+                FileHandle.standardOutput.write(Data("\rDownloading [\(bar)] \(Int(fraction * 100))%".utf8))
+            }
+        }
+        if interactive { print("") }
+        print("Verified FluxBar \(prepared.version).")
+
+        // Ask a running FluxBar from this location to quit; the swap script waits for it.
+        let pid = UpdateEngine.runningPIDs(of: appURL).first ?? 0
+        if pid != 0 {
+            DistributedNotificationCenter.default().postNotificationName(
+                UpdateEngine.quitForUpdateNotification, object: nil, userInfo: nil, deliverImmediately: true)
+        }
+        do {
+            try UpdateEngine.launchSwap(prepared, replacing: appURL, waitForPID: pid, relaunch: pid != 0)
+        } catch {
+            UpdateEngine.discard(prepared)
+            throw CLIError(error.localizedDescription)
+        }
+        print(pid != 0
+              ? "✅ Installing FluxBar \(prepared.version). FluxBar will restart in a few seconds."
+              : "✅ Installing FluxBar \(prepared.version) into \(appURL.path).")
+    }
+}
+
+/// Runs async work from a synchronous command and returns its result.
+func waitFor<T>(_ work: @escaping @Sendable () async throws -> T) throws -> T {
+    let semaphore = DispatchSemaphore(value: 0)
+    var result: Result<T, Error>!
+    Task.detached {
+        do { result = .success(try await work()) } catch { result = .failure(error) }
+        semaphore.signal()
+    }
+    semaphore.wait()
+    do {
+        return try result.get()
+    } catch let error as UpdateError {
+        throw CLIError(error.localizedDescription)
     }
 }

@@ -48,7 +48,7 @@ More detail in [How it stays light](#how-it-stays-light).
 
 ### Private by design
 
-FluxBar works **fully offline**. It makes no network requests and has no analytics or telemetry. Your clipboard history never leaves your Mac, and large items are stored encrypted with a key kept in your Keychain.
+FluxBar has **no analytics or telemetry**. Its only network request is a once-a-day update check to GitHub's public API, which sends nothing about you or your data, and you can turn it off in Settings. Your clipboard history never leaves your Mac, and large items are stored encrypted with a key kept in your Keychain.
 
 ## Install
 
@@ -61,7 +61,12 @@ curl -fsSL https://raw.githubusercontent.com/rimu-7/fluxbar/main/scripts/install
 ```
 
 This installs `FluxBar.app` into `/Applications`, adds the `flux` and `clip` commands to your PATH, and opens the app.
-Run the same command again to update.
+
+### Updating
+
+FluxBar checks for new versions once a day and asks before installing anything. Updates are downloaded from GitHub Releases, checked against their published checksum and code signature, and installed in place. Your clipboard history and settings are kept.
+
+You can also update any time with **Settings › Check Now**, with `flux update`, or by running the install command again.
 
 <details>
 <summary>Installer options</summary>
@@ -121,6 +126,8 @@ flux clip paste            # print the most recent clip
 
 flux net                   # current speed, today's and this month's usage
 flux net live              # stream the speed every second
+
+flux update                # install the latest version (--check to only check)
 ```
 
 `clip` is a shorter command just for history: `clip list`, `clip add "text"` (or `some-command | clip add`), `clip pin 1`, `clip delete 1`, `clip clear --force`, `clip stats`.
@@ -161,6 +168,17 @@ The installer prints which folder it linked the commands into. If that folder is
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
+```
+
+</details>
+
+<details>
+<summary><b>An update won't install</b></summary>
+
+FluxBar replaces itself in the folder it's running from, so that folder must be writable by you. If FluxBar is somewhere else (or was opened straight from the disk image), move it to **Applications** first. You can always update with the install command instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rimu-7/fluxbar/main/scripts/install.sh | bash
 ```
 
 </details>
