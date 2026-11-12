@@ -6,7 +6,7 @@ New to the project? Look for issues labeled **good first issue**.
 ## Reporting bugs and ideas
 
 Open an [issue](https://github.com/rimu-7/fluxbar/issues/new/choose) and pick a template.
-For battery problems, please paste the output of `flux power status`.
+For battery problems, include the setup/status message shown near the top of the Battery tab.
 
 Found a security problem (for example in the root battery helper)? Please don't open a public issue.
 Use GitHub's [private vulnerability reporting](https://github.com/rimu-7/fluxbar/security/advisories/new) instead.
@@ -21,12 +21,22 @@ cd fluxbar
 make build    # debug build
 make test     # run the tests
 make run      # start the menu bar app from the terminal (Ctrl+C to quit)
+make preview  # start the app and open its popover immediately
+```
+
+The Make targets work around stale SwiftPM private interfaces and automatically
+select an older installed SDK when Command Line Tools is missing the SwiftUI
+`StateMacro` plugin required by its default SDK. An explicit `SDKROOT` takes
+precedence, for example:
+
+```bash
+SDKROOT="$(xcrun --sdk macosx26 --show-sdk-path)" make run
 ```
 
 To try a change exactly as users get it:
 
 ```bash
-make install  # builds FluxBar.app and installs it like the curl installer
+make install  # builds and opens the DMG; drag FluxBar into Applications in Finder
 ```
 
 ## Where things live
@@ -67,7 +77,17 @@ CI builds and tests every PR.
 2. Commit, then tag and push: `git tag v1.2.0 && git push origin v1.2.0`.
 3. GitHub Actions builds the universal app and publishes `FluxBar.zip` and `FluxBar.dmg`.
    Installed copies pick it up within a day through the in-app updater.
-   Keep the asset names `FluxBar.zip` and `FluxBar.zip.sha256`: the installer and the updater look for them.
+   Keep the asset names `FluxBar.zip` and `FluxBar.zip.sha256`: the in-app updater looks for them.
    A tag with a suffix (`v1.3.0-beta.1`) is published as a pre-release, which the updater skips.
+
+The packaging jobs mount the DMG read-only, copy the app into a directory with spaces,
+verify its signature and bundled resources, and launch its non-invasive installation check.
+This check never installs a helper or changes login items.
+
+To distribute a notarized DMG that opens under normal Gatekeeper settings, configure
+`MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`, `SIGN_IDENTITY`, `APPLE_ID`, `APPLE_TEAM_ID`
+and `APPLE_APP_PASSWORD` in the release repository's secrets. Without them the workflow
+builds an ad-hoc-signed DMG, which requires the graphical **Open Anyway** approval.
+The ZIP remains an update payload; the DMG is the primary end-user installer.
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).

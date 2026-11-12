@@ -4,7 +4,7 @@
 
 # FluxBar
 
-**Clipboard history, a live network speed meter and a battery charge limiter, in one tiny native menu bar app.**
+**Clipboard history, network speed, battery charge limits and Caffeine in one native macOS menu bar app.**
 
 [![CI](https://github.com/rimu-7/fluxbar/actions/workflows/ci.yml/badge.svg)](https://github.com/rimu-7/fluxbar/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/rimu-7/fluxbar?sort=semver)](https://github.com/rimu-7/fluxbar/releases)
@@ -12,131 +12,82 @@
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)
 ![Apple Silicon & Intel](https://img.shields.io/badge/Apple%20Silicon%20%26%20Intel-supported-555)
 
+[**Download FluxBar.dmg**](https://github.com/rimu-7/fluxbar/releases/latest/download/FluxBar.dmg)
+
 </div>
+
+## Install with Finder
+
+Requires macOS 13 Ventura or newer. Release DMGs support Apple Silicon and Intel Macs.
+
+1. Download **FluxBar.dmg** from [Releases](https://github.com/rimu-7/fluxbar/releases).
+2. Open the disk image and drag **FluxBar.app** onto **Applications**.
+3. Eject the disk image, then open **FluxBar** from Applications.
+4. Look for the clipboard and speed icons in your menu bar. FluxBar opens its popover on first launch; it has no main window or Dock icon.
+
+**The DMG includes everything needed for graphical use. No Terminal, curl installer, Homebrew or separate helper download is required.**
+
+If macOS blocks the first launch of an unnotarized release, open **System Settings → Privacy & Security → Open Anyway** for FluxBar, then confirm. Releases built without the project's Apple signing credentials require this graphical approval.
+
+## Finish setup inside FluxBar
+
+### Battery charge limit
+
+Open the **Battery** tab or **Settings**. Battery setup is shown near the top of both.
+
+- If **Enable** appears, choose it and approve the macOS administrator dialog. The battery controls are already included in the app.
+- If **Update** appears after replacing FluxBar, choose it to update the installed battery controls too.
+- Choose your charge limit using the slider or presets, then turn on the charge limit toggle.
+- **Repair** reinstalls battery controls if charging stops following your limit. **Remove Battery Helper** restores normal charging and removes the helper.
+
+On Macs that support the built-in macOS charge limit, FluxBar uses that setting directly and needs no helper setup. Available limits depend on your hardware and macOS: supported native limits are generally 80–100%; helper-based limits support 50–100%. The app shows when charging control is unavailable instead of claiming a limit is active.
+
+A battery charge limit continues working when FluxBar is closed. Caffeine ends when you turn it off or quit FluxBar.
+
+### Start at login
+
+Open **Settings → Start at Login**. If macOS asks for approval, enable FluxBar in **System Settings → General → Login Items**.
 
 ## Features
 
-### 📋 Clipboard history
+### Clipboard
 
-- Instant full-text search across everything you've copied
-- Keeps rich text, images and files, not just plain text
-- Pin the clips you reuse; pinned clips are never deleted automatically
-- Skips passwords and one-time codes from password managers like 1Password, Bitwarden and KeePassXC
-- Keyboard first: arrow keys, `Return` to copy, `⌘1`–`⌘9` for quick picks
+- Search your clipboard history instantly.
+- Keep text, rich text, images and files.
+- Pin frequently used clips; pinned clips survive automatic cleanup.
+- Skip items marked as concealed by password managers, including passwords and one-time codes.
+- Set retention and history limits, pause recording, and clear history in Settings.
 
-### 📶 Network speed meter
+### Battery
 
-- Live upload and download speed in the menu bar
-- Today's, this month's and this session's data usage
+- View battery, charger, health and power information.
+- Choose a supported charge limit to reduce time spent at a full charge.
+- Set up, update, repair and remove battery controls through the app.
 
-### 🔋 Battery charge limiter
+### Speed
 
-- Holds your battery at a level you choose (e.g. 80%) to slow battery wear
-- Uses the macOS charge limit on macOS 27, so there's nothing extra to install
-- Keeps working when FluxBar is closed, during sleep and after restarts
+- See live upload and download rates in the menu bar.
+- View today's, this month's and the current session's data usage.
+- Manage bandwidth history from Settings.
 
-### ⌨️ `flux` command line
+### Caffeine
 
-- Everything above from the terminal, with `--json` output for scripts
+- Find **Caffeine** immediately after **Speed**.
+- Turn on **Keep awake** to prevent idle display sleep while reading, presenting or focusing.
+- Follow the large elapsed-session timer.
+- Close the popover while Caffeine keeps running. Turn it off to restore normal display sleep.
 
-## Light and private
+## Update graphically
 
-### Light on your Mac
+FluxBar checks GitHub Releases once a day and asks before installing an update. Open **Settings → Check Now** whenever you want to check manually.
 
-About **20 MB of memory** and **well under 1% CPU** when idle. FluxBar avoids constant polling, pauses during sleep, and frees the popover's memory when you close it.
-More detail in [How it stays light](#how-it-stays-light).
+Downloads are checked against the published checksum and app signature before replacement. Your clipboard history and settings are kept.
 
-### Private by design
-
-FluxBar has **no analytics or telemetry**. Its only network request is a once-a-day update check to GitHub's public API, which sends nothing about you or your data, and you can turn it off in Settings. Your clipboard history never leaves your Mac, and large items are stored encrypted with a key kept in your Keychain.
-
-## Install
-
-Requires macOS 13 Ventura or newer.
-
-### Terminal (recommended)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/rimu-7/fluxbar/main/scripts/install.sh | bash
-```
-
-This installs `FluxBar.app` into `/Applications`, adds the `flux` and `clip` commands to your PATH, and opens the app.
-
-### Updating
-
-FluxBar checks for new versions once a day and asks before installing anything. Updates are downloaded from GitHub Releases, checked against their published checksum and code signature, and installed in place. Your clipboard history and settings are kept.
-
-You can also update any time with **Settings › Check Now**, with `flux update`, or by running the install command again.
-
-<details>
-<summary>Installer options</summary>
-
-Pass options after `bash -s --`, for example:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/rimu-7/fluxbar/main/scripts/install.sh | bash -s -- --version 1.2.0
-```
-
-| Option | Description |
-| :-- | :-- |
-| `--version X.Y.Z` | Install a specific release (default: latest) |
-| `--dir PATH` | Where to put FluxBar.app (default: `/Applications`, or `~/Applications`) |
-| `--bin-dir PATH` | Where to put the `flux` and `clip` commands |
-| `--no-launch` | Don't open FluxBar after installing |
-| `--uninstall` | Remove FluxBar (keeps your clipboard history) |
-| `--purge` | With `--uninstall`, also delete history and settings |
-
-</details>
-
-### Disk image
-
-Download **FluxBar.dmg** from [Releases](https://github.com/rimu-7/fluxbar/releases), open it and drag FluxBar to Applications.
-
-> [!NOTE]
-> Until releases are notarized by Apple, macOS blocks the first launch of an app downloaded in a browser.
-> Open **System Settings › Privacy & Security** and click **Open Anyway**. The terminal installer doesn't have this step.
-
-### Turn on the battery limit
-
-```bash
-flux power limit 80
-```
-
-Or use the slider in the **Battery** tab. What happens next depends on your macOS version:
-
-| macOS | How the limit works | Limits |
-| :-- | :-- | :-- |
-| **27**, or 26.7 / 15.8 and later | FluxBar sets the macOS charge limit (the same one in **System Settings › Battery › Charge Limit**). No helper, no password. | 80, 85, 90, 95 or 100% |
-| Older versions | FluxBar installs a small background helper (`com.fluxbar.powerd`) once, which asks for your password. It only wakes up when your battery level, charger or settings change. | 50–100% |
-
-Apple locked the low-level charging controls in macOS 27, so on that version **every** charge-limit app is limited to what macOS allows.
-
-## Command line
-
-```bash
-flux power                 # battery, charger and limit status
-flux power limit 85        # hold at 85% (80–100 on macOS 27, 50–100 before)
-flux power limit off       # charge normally to 100%
-flux power uninstall       # remove the helper (older macOS) and restore normal charging
-
-flux clip list             # recent clips (-s "query" to search, --pinned, --json)
-flux clip get 42           # print clip #42
-flux clip copy 42          # put clip #42 back on the clipboard
-flux clip paste            # print the most recent clip
-
-flux net                   # current speed, today's and this month's usage
-flux net live              # stream the speed every second
-
-flux update                # install the latest version (--check to only check)
-```
-
-`clip` is a shorter command just for history: `clip list`, `clip add "text"` (or `some-command | clip add`), `clip pin 1`, `clip delete 1`, `clip clear --force`, `clip stats`.
-
-Add `--help` to any command for all options.
+You can also download a newer DMG, quit FluxBar, and drag the new copy into Applications, choosing **Replace** in Finder. Reopen FluxBar and choose **Update** in Battery or Settings if battery controls need updating. If in-app updating is blocked by a read-only location or folder permissions, use this same Finder replacement flow.
 
 ## Keyboard shortcuts
 
-In the clipboard tab:
+In the Clipboard tab:
 
 | Key | Action |
 | :-- | :-- |
@@ -145,95 +96,72 @@ In the clipboard tab:
 | `⌘P` | Pin or unpin |
 | `Delete` | Delete the selected clip |
 | `⌘1` … `⌘9` | Copy one of the first nine clips |
-| `Esc` | Clear the search, then close |
+| `Esc` | Clear search, then close the popover |
 
 ## Troubleshooting
 
 <details>
-<summary><b>The battery doesn't stop at my limit</b></summary>
+<summary><b>I opened FluxBar but cannot find it</b></summary>
 
-1. Run `flux power status` and check the **Charge limit** line.
-   - On macOS 27 it should say `80% · macOS charge limit`. If it says `off`, run `flux power limit 80`.
-   - On older macOS the **Helper** line should say `running`. If the helper isn't installed, run `flux power limit 80`.
-2. On macOS 27, close System Settings before changing the limit from FluxBar. An open Battery settings window can save its old value back when you click **Done**.
-3. Quit other charge-limit apps (AlDente, Battery Toolkit, `battery`, WattBit, …). Two tools controlling charging at the same time will fight each other.
-4. macOS may let the battery go a few percent above or below the limit. That's normal.
+FluxBar lives in the menu bar. Click its clipboard or speed icon. Opening FluxBar again from Applications also opens its popover. It does not create a main window or Dock icon.
 
 </details>
 
 <details>
-<summary><b><code>flux: command not found</code></b></summary>
+<summary><b>The battery limit is not working</b></summary>
 
-The installer prints which folder it linked the commands into. If that folder isn't in your PATH (usually `~/.local/bin`), add it to `~/.zshrc`:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-</details>
-
-<details>
-<summary><b>An update won't install</b></summary>
-
-FluxBar replaces itself in the folder it's running from, so that folder must be writable by you. If FluxBar is somewhere else (or was opened straight from the disk image), move it to **Applications** first. You can always update with the install command instead:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/rimu-7/fluxbar/main/scripts/install.sh | bash
-```
+1. Open **Battery** and check the setup message near the top. Choose **Enable**, **Update** or **Repair** if offered, and approve macOS authorization.
+2. Check that the charge limit toggle is on and the selected limit is supported. A cancelled approval does not enable the limit.
+3. If FluxBar uses the macOS charge limit, close System Settings before changing it in FluxBar; an open Battery settings window can save its old value back.
+4. Quit other charge-limit apps so they do not compete for charging control.
+5. A battery may settle a few percent above or below the selected limit. Unsupported hardware or macOS charging controls cannot be enabled by installing a different way.
 
 </details>
 
 <details>
-<summary><b>A copied item doesn't show up</b></summary>
+<summary><b>An update will not install</b></summary>
 
-Check that recording isn't paused: the record button at the top of the clipboard tab turns orange when paused. Items marked as passwords or one-time codes by password managers are skipped on purpose.
+Quit FluxBar and replace it from the latest DMG using Finder. Keep it in Applications, eject the disk image and reopen the installed copy. Your history and settings are stored separately from the app.
 
 </details>
 
-## Uninstall
+<details>
+<summary><b>A copied item does not appear</b></summary>
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/rimu-7/fluxbar/main/scripts/install.sh | bash -s -- --uninstall
-```
+Check that recording is not paused. The record button in Clipboard turns orange when paused. Concealed items from password managers are intentionally skipped.
 
-This also removes the battery helper and restores normal charging. Add `--purge` to delete your clipboard history too.
+</details>
 
-## How it stays light
+## Remove FluxBar with Finder
 
-- The popover's interface is created when you open it and thrown away when you close it.
-- The speed meter samples once a second only while it's visible (every 2 s in Low Power Mode, every 30 s in the background just to keep usage totals). It stops during sleep, and the menu bar is only redrawn when the number changes.
-- The clipboard check reads a single counter twice a second. Content is read only when something new was copied, and only in the formats FluxBar keeps.
-- Battery readings are driven by macOS power notifications, never polled. On macOS 27 the charge limit runs entirely inside macOS, so FluxBar has no background helper at all.
-- Images and large rich text are stored as encrypted files outside the database, and cleaned up when their clip is deleted.
+1. Turn off the battery charge limit in **Battery**.
+2. In **Battery** or **Settings**, choose **Remove Battery Helper** if shown and approve the macOS dialog. If **Remove Old Battery Helper** appears, remove that too.
+3. Turn off **Start at Login** in Settings.
+4. Choose **Quit FluxBar** in Settings, then move FluxBar from Applications to Trash.
+
+Clipboard history and preferences are kept separately. To erase history, use **Settings → Delete All Clips** before quitting.
+
+## Privacy and efficiency
+
+FluxBar has no analytics or telemetry. Clipboard history stays on your Mac; images and large attachments are stored encrypted using a key in Keychain. Update checks go to GitHub Releases and can be turned off in Settings.
+
+The popover's interface is released when closed. Network sampling slows down in the background and stops during sleep; battery readings use macOS power notifications. Caffeine uses a macOS power assertion, which is released when FluxBar exits.
 
 ## Data locations
 
-| What | Where |
+| Data | Location |
 | :-- | :-- |
 | Clipboard history | `~/Library/Application Support/ClipSuite/clips.db` |
-| Images, attachments, data usage | `~/Library/Application Support/FluxBar/` |
-| Battery limit (macOS 27) | Stored by macOS, shown in **System Settings › Battery** |
-| Battery limit settings (older macOS) | `/Library/Application Support/FluxBar/charge-limit.json` |
-| Battery helper (older macOS) | `/Library/PrivilegedHelperTools/com.fluxbar.powerd` and `/Library/LaunchDaemons/com.fluxbar.powerd.plist` |
+| Images, attachments, network usage | `~/Library/Application Support/FluxBar/` |
+| Native charge limit | Managed by macOS; visible in System Settings → Battery |
+| Helper-based charge settings | `/Library/Application Support/FluxBar/charge-limit.json` |
+| Battery helper | `/Library/PrivilegedHelperTools/com.fluxbar.powerd` |
 
 ## Contributing
 
-Contributions are welcome, from bug reports and ideas to docs and code. 🙌
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for source builds, tests and release packaging. Bug reports and ideas are welcome in [Issues](https://github.com/rimu-7/fluxbar/issues).
 
-- Found a bug or have an idea? [Open an issue](https://github.com/rimu-7/fluxbar/issues/new/choose).
-- Want to write code? Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, project layout and guidelines.
-  Issues labeled [good first issue](https://github.com/rimu-7/fluxbar/labels/good%20first%20issue) are a nice place to start.
-
-Quick start:
-
-```bash
-git clone https://github.com/rimu-7/fluxbar.git && cd fluxbar
-make test     # run the tests
-make run      # run the app from the terminal
-make app      # build dist/FluxBar.app, FluxBar.zip and FluxBar.dmg
-```
-
-If FluxBar is useful to you, a ⭐ on GitHub helps others find it.
+Optional scripting tools remain bundled for advanced use; see [command-line documentation](docs/COMMAND_LINE.md). They are not needed for installation, setup or everyday use.
 
 ## License
 

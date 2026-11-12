@@ -20,14 +20,20 @@ public enum PowerHelperManager {
 
     public static var isInstalled: Bool {
         let fm = FileManager.default
-        return fm.fileExists(atPath: installedBinaryPath)
+        return fm.isExecutableFile(atPath: installedBinaryPath)
             && fm.fileExists(atPath: launchDaemonPlistPath)
-            && fm.fileExists(atPath: ChargeLimitConfig.directoryURL.path)
+            && fm.fileExists(atPath: ChargeLimitConfig.fileURL.path)
     }
 
     /// True when the current user may change the limit without a password (admin group, helper installed).
     public static var canWriteConfig: Bool {
         FileManager.default.isWritableFile(atPath: ChargeLimitConfig.directoryURL.path)
+    }
+
+    /// A DMG replacement updates the app but leaves an older root helper in place.
+    public static var needsUpdate: Bool {
+        guard isInstalled, let bundled = bundledDaemonPath() else { return false }
+        return !FileManager.default.contentsEqual(atPath: bundled, andPath: installedBinaryPath)
     }
 
     // MARK: - Settings
@@ -73,28 +79,52 @@ public enum PowerHelperManager {
     /// Runs `osascript` in a child process so the UI never blocks.
     public static func installWithAdminPrompt(config: ChargeLimitConfig) async throws {
         guard let daemon = bundledDaemonPath() else { throw HelperError.daemonBinaryMissing }
-        let args = "install --limit \(config.limit) --enabled \(config.isEnabled ? "true" : "false")"
+        let args = ["install", "--limit", String(config.limit), "--enabled", config.isEnabled ? "true" : "false"]
         try await runWithAdminPrompt(executable: daemon, arguments: args)
+        guard isInstalled else { throw HelperError.notInstalled }
     }
 
     public static func uninstallWithAdminPrompt() async throws {
         let daemon = FileManager.default.isExecutableFile(atPath: installedBinaryPath) ? installedBinaryPath : bundledDaemonPath()
         guard let daemon else { throw HelperError.daemonBinaryMissing }
-        try await runWithAdminPrompt(executable: daemon, arguments: "uninstall")
+        try await runWithAdminPrompt(executable: daemon, arguments: ["uninstall"])
     }
 
-    private static func runWithAdminPrompt(executable: String, arguments: String) async throws {
-        let escaped = executable
+    /// Quote the complete command before embedding it in AppleScript. App folders may contain
+    /// spaces, apostrophes, quotes or shell metacharacters.
+    static func authorizationScript(executable: String, arguments: [String]) -> String {
+        let command = shellCommand(executable: executable, arguments: arguments)
+        let escaped = command
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "do shell script (quoted form of \"\(escaped)\") & \" \(arguments)\" with prompt \"FluxBar needs permission to manage battery charging.\" with administrator privileges"
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+        return "do shell script \"\(escaped)\" with prompt \"FluxBar needs permission to manage battery charging.\" with administrator privileges"
+    }
+
+    static func shellCommand(executable: String, arguments: [String]) -> String {
+        ([executable] + arguments).map {
+            "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }.joined(separator: " ")
+    }
+
+    private static func runWithAdminPrompt(executable: String, arguments: [String]) async throws {
+        let script = authorizationScript(executable: executable, arguments: arguments)
+        // A file avoids a full stderr pipe blocking osascript before it exits.
+        let errorURL = FileManager.default.temporaryDirectory.appendingPathComponent("fluxbar-authorization-\(UUID().uuidString).log")
+        FileManager.default.createFile(atPath: errorURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        let errorFile = try FileHandle(forWritingTo: errorURL)
+        defer {
+            try? errorFile.close()
+            try? FileManager.default.removeItem(at: errorURL)
+        }
 
         let status: Int32 = try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
             process.arguments = ["-e", script]
             process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
+            process.standardError = errorFile
             process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
             do {
                 try process.run()
@@ -102,22 +132,29 @@ public enum PowerHelperManager {
                 continuation.resume(throwing: error)
             }
         }
-        guard status == 0 else { throw HelperError.cancelledOrFailed }
+        guard status == 0 else {
+            let details = (try? String(contentsOf: errorURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if details.contains("(-128)") { throw HelperError.cancelledOrFailed }
+            throw HelperError.authorizationFailed(details.isEmpty ? "Please try again from Battery settings." : details)
+        }
     }
 
     public enum HelperError: LocalizedError {
         case notInstalled
         case daemonBinaryMissing
         case cancelledOrFailed
+        case authorizationFailed(String)
 
         public var errorDescription: String? {
             switch self {
             case .notInstalled:
-                return "The battery helper is not installed. Run 'flux power install' or use Install in the app."
+                return "Battery controls need setup. Open the Battery tab and choose Enable."
             case .daemonBinaryMissing:
                 return "Could not find com.fluxbar.powerd next to this app. Reinstall FluxBar."
             case .cancelledOrFailed:
-                return "Authorization was cancelled or the install failed."
+                return "Authorization was cancelled. No new battery limit was applied. Choose Enable to try again."
+            case .authorizationFailed(let details):
+                return "Battery setup failed: \(details)"
             }
         }
     }

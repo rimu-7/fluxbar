@@ -31,14 +31,15 @@ public struct BatteryPopoverView: View {
                 // 1. Hero Dynamic Battery & Bypass Header Card
                 heroBatteryCard
 
+                BatterySetupView(batteryVM: batteryVM)
+
+                chargeLimiterCard
+
                 // 2. Hardware Charger Details & Live Negotiated Power Flow
                 chargerDetailsCard
 
                 // 3. Reverse Charging & External Accessories Power Delivery
                 accessoryPowerDeliveryCard
-
-                // 4. Hardware Charge Limiter & Threshold Range Chart
-                chargeLimiterCard
 
                 // 5. Battery Health & Degradation Pie / Donut Chart
                 healthDonutChartCard
@@ -52,8 +53,6 @@ public struct BatteryPopoverView: View {
                 // 8. Live Hardware Diagnostics & Sensors Grid
                 diagnosticsSensorGrid
 
-                // 9. Kernel SMC Control & Touch ID Authorization
-                kernelSMCAuthorizationCard
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -694,7 +693,7 @@ public struct BatteryPopoverView: View {
                     Text(batteryVM.isLimiterEnabled
                          ? (batteryVM.method == .macOS
                             ? "macOS holds the charge at \(batteryVM.chargeLimit)%"
-                            : "Direct adapter bypass engages at \(batteryVM.chargeLimit)%")
+                            : "Charging will hold at \(batteryVM.chargeLimit)%")
                          : "Limiter inactive — charging up to 100%")
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundColor(.primary)
@@ -710,6 +709,7 @@ public struct BatteryPopoverView: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .tint(Color.orange)
+                .disabled(batteryVM.isAuthorizingHelper)
             }
 
             if batteryVM.isLimiterEnabled {
@@ -790,6 +790,7 @@ public struct BatteryPopoverView: View {
                         step: 5
                     )
                     .tint(.orange)
+                    .disabled(batteryVM.isAuthorizingHelper)
                 }
                 .padding(.top, 2)
 
@@ -821,6 +822,7 @@ public struct BatteryPopoverView: View {
                                 )
                         }
                         .buttonStyle(.plain)
+                        .disabled(batteryVM.isAuthorizingHelper)
                         .onHover { isHovered in
                             hoveredPreset = isHovered ? preset : nil
                         }
@@ -1235,126 +1237,6 @@ public struct BatteryPopoverView: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(color.opacity(0.18), lineWidth: 0.5)
-                }
-        )
-    }
-
-    // MARK: - 7. Kernel SMC Control & Touch ID Authorization
-
-    @ViewBuilder
-    private var kernelSMCAuthorizationCard: some View {
-        if batteryVM.method == .macOS {
-            nativeLimitCard
-        } else {
-            helperCard
-        }
-    }
-
-    /// macOS 27+: the limit is macOS's own, no helper involved.
-    private var nativeLimitCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: "checkmark.shield.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(Color.green)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Using the macOS Charge Limit")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text("No helper needed. macOS enforces the limit, even during sleep and when FluxBar is closed. It's the same setting as System Settings › Battery.")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer()
-
-                if batteryVM.isHelperInstalled {
-                    Button("Remove Old Helper") { batteryVM.uninstallHelper() }
-                        .controlSize(.small)
-                        .disabled(batteryVM.isAuthorizingHelper)
-                        .help("The FluxBar battery helper isn't used on this Mac")
-                }
-            }
-
-            if let message = batteryVM.statusMessage {
-                Text(message)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(Color.white.opacity(0.035))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .strokeBorder(Color.green.opacity(0.2), lineWidth: 0.5)
-                }
-        )
-    }
-
-    private var helperCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: batteryVM.isHelperInstalled ? "checkmark.shield.fill" : "lock.shield")
-                    .font(.system(size: 18))
-                    .foregroundColor(batteryVM.isHelperInstalled ? Color.green : Color.orange)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(batteryVM.isHelperInstalled ? "Battery Helper Installed" : "Battery Helper Needed")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.primary)
-
-                    Text(batteryVM.isHelperInstalled
-                         ? "The limit is enforced in the background, even when FluxBar is closed."
-                         : "Install once (password or Touch ID) so FluxBar can pause charging at your limit.")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-
-                if !batteryVM.isHelperInstalled {
-                    Button(action: {
-                        batteryVM.authorizeHelper()
-                    }) {
-                        Text(batteryVM.isAuthorizingHelper ? "Installing…" : "Install")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 5)
-                            .background(
-                                LinearGradient(colors: [Color.orange, Color.red.opacity(0.85)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                            )
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(batteryVM.isAuthorizingHelper)
-                } else {
-                    Button("Remove") { batteryVM.uninstallHelper() }
-                        .controlSize(.small)
-                        .disabled(batteryVM.isAuthorizingHelper)
-                        .help("Uninstall the helper and restore normal charging")
-                }
-            }
-
-            if let message = batteryVM.statusMessage {
-                Text(message)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(batteryVM.isHelperInstalled ? .secondary : .orange)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(Color.white.opacity(0.035))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .strokeBorder(batteryVM.isHelperInstalled ? Color.green.opacity(0.2) : Color.orange.opacity(0.2), lineWidth: 0.5)
                 }
         )
     }

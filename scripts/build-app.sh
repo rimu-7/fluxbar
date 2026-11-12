@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds dist/FluxBar.app, dist/FluxBar.zip (for the curl installer) and dist/FluxBar.dmg.
+# Builds dist/FluxBar.app, dist/FluxBar.dmg and FluxBar.zip (for in-app updates).
 #
 #   scripts/build-app.sh                 # native arch, ad-hoc signed
 #   UNIVERSAL=1 scripts/build-app.sh     # arm64 + x86_64 (needs Xcode, used in CI)
@@ -11,6 +11,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+# Direct script invocations use the same local toolchain fixes as Make targets.
+export SWIFT_EXEC_MANIFEST="${SWIFT_EXEC_MANIFEST:-$ROOT/scripts/swiftc-manifest}"
+if [ -z "${SDKROOT:-}" ]; then
+  SDKROOT="$(bash "$ROOT/scripts/select-sdk.sh")"
+  export SDKROOT
+fi
 
 VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/ClipCore/FluxBarInfo.swift)"
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
@@ -29,9 +36,9 @@ SWIFT_FLAGS=(-c release -Xswiftc -Osize)
 if [ "${UNIVERSAL:-0}" = "1" ]; then
   SWIFT_FLAGS+=(--arch arm64 --arch x86_64)
 fi
-for p in "${PRODUCTS[@]}"; do
-  swift build "${SWIFT_FLAGS[@]}" --product "$p"
-done
+# Build the graph once; separate --product builds can repeatedly rebuild shared
+# modules with newer SwiftPM engines. The bundle checks below require every tool.
+swift build "${SWIFT_FLAGS[@]}"
 BIN="$(swift build "${SWIFT_FLAGS[@]}" --show-bin-path)"
 
 # ---------------------------------------------------------------- bundle
@@ -43,6 +50,10 @@ for p in "${PRODUCTS[@]}"; do
   strip -x "$APP/Contents/MacOS/$p" 2>/dev/null || true
 done
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+for resource in "$BIN/"*.bundle; do
+  [ -d "$resource" ] || continue
+  ditto "$resource" "$APP/Contents/Resources/$(basename "$resource")"
+done
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -82,12 +93,14 @@ else
 fi
 # Inner executables first, then the bundle.
 for p in flux clip com.fluxbar.powerd; do
-  codesign "${SIGN_ARGS[@]}" --identifier "com.fluxbar.$p" "$APP/Contents/MacOS/$p"
+  IDENTIFIER="com.fluxbar.$p"
+  if [ "$p" = com.fluxbar.powerd ]; then IDENTIFIER="$p"; fi
+  codesign "${SIGN_ARGS[@]}" --identifier "$IDENTIFIER" "$APP/Contents/MacOS/$p"
 done
 codesign "${SIGN_ARGS[@]}" "$APP"
 codesign --verify --strict "$APP"
 
-# ---------------------------------------------------------------- zip (curl installer)
+# ---------------------------------------------------------------- zip (in-app updates)
 say "Creating FluxBar.zip"
 rm -f "$DIST/FluxBar.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$DIST/FluxBar.zip"
@@ -106,6 +119,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
+cp Resources/Install.txt "$STAGE/Install FluxBar.txt"
 rm -f "$DIST/FluxBar.dmg"
 hdiutil create -quiet -volname "FluxBar $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 "$DIST/FluxBar.dmg"
 if [ "$IDENTITY" != "-" ]; then

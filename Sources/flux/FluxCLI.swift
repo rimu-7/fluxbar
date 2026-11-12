@@ -597,7 +597,7 @@ struct UpdateCommand: ParsableCommand {
         if check { return }
 
         guard let appURL else {
-            throw CLIError("This flux isn't inside FluxBar.app. Update with the installer instead:\n  curl -fsSL https://raw.githubusercontent.com/\(UpdateEngine.repository)/main/scripts/install.sh | bash")
+            throw CLIError("This flux isn't inside FluxBar.app. Download the latest FluxBar.dmg from https://github.com/\(UpdateEngine.repository)/releases and replace FluxBar in Applications using Finder.")
         }
         if let blocker = UpdateEngine.installBlocker(for: appURL) { throw CLIError(blocker) }
 

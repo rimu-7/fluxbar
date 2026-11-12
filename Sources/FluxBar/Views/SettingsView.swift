@@ -6,6 +6,7 @@ import NetCore
 public struct SettingsView: View {
     @ObservedObject var viewModel: ClipBarViewModel
     @ObservedObject private var updater = GitHubUpdater.shared
+    @ObservedObject private var batteryVM = BatteryViewModel.shared
 
     @State private var startAtLogin: Bool = LaunchAtLoginHelper.isEnabled
     @State private var isPaused: Bool
@@ -15,8 +16,6 @@ public struct SettingsView: View {
 
     @State private var isClipboardEnabled: Bool
     @State private var isSpeedMeterEnabled: Bool
-    @State private var isBatteryLimiterEnabled: Bool
-    @State private var batteryChargeLimit: Int
 
     @State private var isCustomRetention: Bool = false
     @State private var customRetentionDays: Int = 35
@@ -61,8 +60,6 @@ public struct SettingsView: View {
         _maxHistory = State(initialValue: currentSettings.maxHistory)
         _isClipboardEnabled = State(initialValue: currentSettings.isClipboardEnabled)
         _isSpeedMeterEnabled = State(initialValue: currentSettings.isSpeedMeterEnabled)
-        _isBatteryLimiterEnabled = State(initialValue: currentSettings.isBatteryLimiterEnabled)
-        _batteryChargeLimit = State(initialValue: currentSettings.batteryChargeLimit)
 
         let isStandardRetention = [1, 7, 30, 90, 365, 0].contains(currentSettings.retentionDays)
         _isCustomRetention = State(initialValue: !isStandardRetention)
@@ -82,6 +79,8 @@ public struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    BatterySetupView(batteryVM: batteryVM)
+
                     // 1. TOOLS & MENU BAR VISIBILITY
                     toolsSection
 
@@ -253,19 +252,14 @@ public struct SettingsView: View {
 
                     Spacer(minLength: 8)
 
-                    Toggle("", isOn: $isBatteryLimiterEnabled)
+                    Toggle("Battery charge limit", isOn: Binding(
+                        get: { batteryVM.isLimiterEnabled },
+                        set: { batteryVM.setLimiterEnabled($0) }
+                    ))
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .controlSize(.small)
-                        .onChange(of: isBatteryLimiterEnabled) { newValue in
-                            if !newValue && !isClipboardEnabled && !isSpeedMeterEnabled {
-                                isBatteryLimiterEnabled = true
-                                return
-                            }
-                            var updated = viewModel.settings
-                            updated.isBatteryLimiterEnabled = newValue
-                            viewModel.updateSettings(updated)
-                        }
+                        .disabled(batteryVM.isAuthorizingHelper || batteryVM.method == .unavailable)
                 }
                 .padding(.vertical, 8)
             }

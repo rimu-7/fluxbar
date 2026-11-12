@@ -346,7 +346,7 @@ public enum UpdateEngine {
             return "Move FluxBar to your Applications folder first, then check for updates again."
         }
         guard FileManager.default.isWritableFile(atPath: folder.path) else {
-            return "FluxBar can't write to \(folder.path). Update with the terminal installer instead."
+            return "FluxBar can't write to \(folder.path). Download the latest DMG, quit FluxBar, and replace the app in Applications using Finder."
         }
         return nil
     }

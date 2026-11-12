@@ -1,11 +1,18 @@
-# On a normal Mac with Xcode or working Command Line Tools, plain `swift` works and these are ignored.
-# This machine's CLT ship a mismatched PackageDescription, so fall back to the patched toolchain if present.
-ifneq ($(wildcard /tmp/test_patch/usr/bin/swiftc),)
-export SWIFT_EXEC ?= /tmp/test_patch/usr/bin/swiftc
-export SWIFT_EXEC_MANIFEST ?= $(PWD)/scripts/swiftc-manifest
+# The manifest wrapper passes through on healthy toolchains and works around
+# stale SwiftPM private interfaces in some Command Line Tools installs.
+export SWIFT_EXEC_MANIFEST ?= $(CURDIR)/scripts/swiftc-manifest
+
+# Honor an explicit SDKROOT; otherwise avoid incomplete CLT SwiftUI SDKs.
+ifeq ($(origin SDKROOT), undefined)
+export SDKROOT := $(shell bash ./scripts/select-sdk.sh)
 endif
 
-.PHONY: all build test run app dmg install uninstall icon clean
+# Keep support for the optional local compiler used by older setups.
+ifneq ($(wildcard /tmp/test_patch/usr/bin/swiftc),)
+export SWIFT_EXEC ?= /tmp/test_patch/usr/bin/swiftc
+endif
+
+.PHONY: all build test run preview app dmg install uninstall icon clean
 
 all: build
 
@@ -18,15 +25,18 @@ test:
 run: build
 	.build/debug/FluxBar
 
+preview: build
+	.build/debug/FluxBar --preview
+
 # dist/FluxBar.app + FluxBar.zip + FluxBar.dmg
 app:
 	./scripts/build-app.sh
 
 dmg: app
 
-# Build and install locally exactly like the curl installer would.
+# Open the built DMG for the same Finder installation used by end users.
 install: app
-	FLUXBAR_ZIP=dist/FluxBar.zip ./scripts/install.sh
+	open dist/FluxBar.dmg
 
 uninstall:
 	./scripts/install.sh --uninstall

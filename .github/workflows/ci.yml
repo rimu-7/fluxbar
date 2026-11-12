@@ -92,6 +92,9 @@ jobs:
           ditto -x -k FluxBar.zip unzipped
           codesign --verify --deep --strict unzipped/FluxBar.app
 
+      - name: Test graphical DMG installation
+        run: bash scripts/verify-dmg.sh
+
       - uses: actions/upload-artifact@v4
         with:
           name: FluxBar-${{ github.sha }}

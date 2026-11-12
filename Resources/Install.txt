@@ -1,0 +1,24 @@
+Install FluxBar
+
+1. Drag FluxBar.app onto Applications in this disk image.
+2. Eject the disk image.
+3. Open FluxBar from Applications. Look for its clipboard and speed icons in the menu bar.
+
+Everything is set up inside the app. Terminal and the curl installer are not required.
+
+Battery limit: open Battery, choose Enable if shown, and approve the macOS administrator
+dialog. If Update is shown after upgrading FluxBar, choose it to update battery controls.
+On supported Macs that use the macOS charge limit, no helper setup is needed.
+Charging capabilities and available limits depend on your Mac and macOS version.
+
+Start at login: open FluxBar Settings and turn on Start at Login.
+Update: open Settings and choose Check Now, or replace FluxBar using a newer DMG.
+Caffeine: open the Caffeine tab after Speed and turn on Keep awake.
+
+If macOS blocks an unnotarized release, open System Settings > Privacy & Security and
+choose Open Anyway for FluxBar. Apple-signed, notarized releases do not need this step.
+
+To remove FluxBar, first turn off the charge limit and choose Remove Battery Helper
+if shown in Settings. Turn off Start at Login, quit FluxBar, then move it to Trash.
+
+Help and releases: https://github.com/rimu-7/fluxbar/releases

@@ -1,8 +1,8 @@
 name: Release
 
 # Push a tag like v1.2.1 (must match FluxBarInfo.version) to publish to GitHub Releases:
-#   FluxBar.zip + .sha256   used by the curl installer and the in-app updater (keep these names)
-#   FluxBar.dmg + .sha256   for manual installs
+#   FluxBar.zip + .sha256   used by the in-app updater (keep these names)
+#   FluxBar.dmg + .sha256   full graphical installation
 # Tags with a suffix (v1.3.0-beta.1) are published as pre-releases, which the updater ignores.
 on:
   push:
@@ -57,7 +57,16 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
         run: |
+          set -euo pipefail
+          umask 077
+          for name in MACOS_CERT_PASSWORD SIGN_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Signing is enabled but $name is missing."
+              exit 1
+            fi
+          done
           KEYCHAIN="$RUNNER_TEMP/build.keychain"
           security create-keychain -p ci "$KEYCHAIN"
           security set-keychain-settings -lut 3600 "$KEYCHAIN"
@@ -93,6 +102,17 @@ jobs:
           shasum -a 256 -c FluxBar.zip.sha256
           shasum -a 256 -c FluxBar.dmg.sha256
           hdiutil verify FluxBar.dmg
+
+      - name: Test graphical DMG installation
+        run: bash scripts/verify-dmg.sh
+
+      - name: Report signing status
+        run: |
+          if [ "$HAS_SIGNING_CERT" = true ]; then
+            echo 'DMG: Developer ID signed and notarized.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'DMG: ad-hoc signed. First launch requires Privacy & Security > Open Anyway.' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')

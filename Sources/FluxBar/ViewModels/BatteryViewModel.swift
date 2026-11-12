@@ -16,6 +16,7 @@ public final class BatteryViewModel: ObservableObject {
     @Published public var isLimiterEnabled: Bool
     @Published public var isBypassActive: Bool = false
     @Published public var isHelperInstalled: Bool
+    @Published public var helperNeedsUpdate: Bool = false
     @Published public var isAuthorizingHelper: Bool = false
     @Published public var statusMessage: String?
 
@@ -53,9 +54,12 @@ public final class BatteryViewModel: ObservableObject {
             self.hysteresis = config.hysteresis
         } else {
             self.chargeLimit = ChargeLimitConfig.clampLimit(settings.batteryChargeLimit > 0 ? settings.batteryChargeLimit : 80)
-            self.isLimiterEnabled = settings.isBatteryLimiterEnabled
+            // A saved preference alone cannot enforce a charge limit.
+            self.isLimiterEnabled = false
         }
 
+        self.helperNeedsUpdate = PowerHelperManager.needsUpdate
+        persistSettings()
         setupSubscriptions()
         monitor.startMonitoring()
         updateBypassState()
@@ -106,6 +110,7 @@ public final class BatteryViewModel: ObservableObject {
     // MARK: - Actions
 
     public func setChargeLimit(_ newLimit: Int) {
+        guard !isAuthorizingHelper else { return }
         let clamped = normalized(newLimit)
         guard clamped != chargeLimit else { return }
         chargeLimit = clamped
@@ -113,6 +118,11 @@ public final class BatteryViewModel: ObservableObject {
     }
 
     public func setLimiterEnabled(_ enabled: Bool) {
+        guard !isAuthorizingHelper else { return }
+        guard method != .unavailable else {
+            statusMessage = "Charge limits are not supported by this Mac’s hardware and macOS combination."
+            return
+        }
         guard enabled != isLimiterEnabled else { return }
         isLimiterEnabled = enabled
         scheduleSave(persistToSettings: true)
@@ -130,16 +140,15 @@ public final class BatteryViewModel: ObservableObject {
     }
 
     private func save(persistToSettings: Bool) {
+        guard method != .unavailable else {
+            isLimiterEnabled = false
+            persistSettings()
+            statusMessage = "Charge limits are not supported by this Mac’s hardware and macOS combination."
+            return
+        }
         let config = ChargeLimitConfig(isEnabled: isLimiterEnabled, limit: chargeLimit, hysteresis: hysteresis)
 
-        if persistToSettings {
-            var settings = ClipBarViewModel.shared.settings
-            if settings.batteryChargeLimit != config.limit || settings.isBatteryLimiterEnabled != config.isEnabled {
-                settings.batteryChargeLimit = config.limit
-                settings.isBatteryLimiterEnabled = config.isEnabled
-                ClipBarViewModel.shared.updateSettings(settings)
-            }
-        }
+        if persistToSettings { persistSettings() }
 
         if method == .macOS {
             do {
@@ -149,6 +158,11 @@ public final class BatteryViewModel: ObservableObject {
                     ? "Charging will hold at \(applied)% (macOS charge limit)."
                     : "Limit off. Charging normally to 100%."
             } catch {
+                if let current = NativeChargeLimit.currentLimit() {
+                    isLimiterEnabled = current < 100
+                    if current < 100 { chargeLimit = current }
+                    persistSettings()
+                }
                 statusMessage = error.localizedDescription
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.refresh() }
@@ -156,8 +170,14 @@ public final class BatteryViewModel: ObservableObject {
         }
 
         isHelperInstalled = PowerHelperManager.isInstalled
-        guard isHelperInstalled else {
-            statusMessage = "Install the battery helper to enforce this limit."
+        helperNeedsUpdate = PowerHelperManager.needsUpdate
+        if !isHelperInstalled || helperNeedsUpdate || !PowerHelperManager.canWriteConfig {
+            if config.isEnabled || isHelperInstalled {
+                // DMG installs and standard-user accounts use the same graphical setup path.
+                authorizeHelper()
+            } else {
+                statusMessage = "Limit off. Charging normally."
+            }
             return
         }
         do {
@@ -175,6 +195,7 @@ public final class BatteryViewModel: ObservableObject {
     public func refresh() {
         monitor.refresh()
         isHelperInstalled = PowerHelperManager.isInstalled
+        helperNeedsUpdate = PowerHelperManager.needsUpdate
         if method == .macOS, pendingSave == nil, let native = NativeChargeLimit.currentLimit() {
             // Pick up changes made in System Settings.
             let enabled = native < 100
@@ -191,15 +212,46 @@ public final class BatteryViewModel: ObservableObject {
     }
 
     public func authorizeHelper() {
-        guard !isAuthorizingHelper else { return }
+        guard method == .helper, !isAuthorizingHelper else { return }
+        pendingSave?.cancel()
+        pendingSave = nil
         isAuthorizingHelper = true
         statusMessage = "Waiting for administrator approval…"
-        let config = ChargeLimitConfig(isEnabled: isLimiterEnabled, limit: chargeLimit, hysteresis: hysteresis)
+        let previouslyEnabled = PowerHelperManager.isInstalled ? (ChargeLimitConfig.load()?.isEnabled ?? false) : false
+        let config = ChargeLimitConfig(isEnabled: isHelperInstalled ? isLimiterEnabled : true, limit: chargeLimit, hysteresis: hysteresis)
 
         Task { @MainActor in
             do {
                 try await PowerHelperManager.installWithAdminPrompt(config: config)
-                statusMessage = "Battery helper installed. Limit is now enforced, even when FluxBar is closed."
+                isLimiterEnabled = config.isEnabled
+                statusMessage = config.isEnabled
+                    ? "Battery controls are ready. Charging will hold at \(config.limit)%, even when FluxBar is closed."
+                    : "Battery controls are ready. The charge limit is off."
+            } catch {
+                // Restore actual state after a cancelled or failed setup, rather than leaving
+                // an enabled-looking toggle for a limit that is not being enforced.
+                isLimiterEnabled = previouslyEnabled
+                statusMessage = error.localizedDescription
+            }
+            persistSettings()
+            isAuthorizingHelper = false
+            refresh()
+        }
+    }
+
+    public func uninstallHelper() {
+        guard !isAuthorizingHelper else { return }
+        pendingSave?.cancel()
+        pendingSave = nil
+        isAuthorizingHelper = true
+        Task { @MainActor in
+            do {
+                try await PowerHelperManager.uninstallWithAdminPrompt()
+                if method == .helper {
+                    isLimiterEnabled = false
+                    persistSettings()
+                }
+                statusMessage = method == .macOS ? "Old battery helper removed." : "Battery helper removed. Normal charging restored."
             } catch {
                 statusMessage = error.localizedDescription
             }
@@ -208,18 +260,11 @@ public final class BatteryViewModel: ObservableObject {
         }
     }
 
-    public func uninstallHelper() {
-        guard !isAuthorizingHelper else { return }
-        isAuthorizingHelper = true
-        Task { @MainActor in
-            do {
-                try await PowerHelperManager.uninstallWithAdminPrompt()
-                statusMessage = method == .macOS ? "Old battery helper removed." : "Battery helper removed. Normal charging restored."
-            } catch {
-                statusMessage = error.localizedDescription
-            }
-            isAuthorizingHelper = false
-            refresh()
-        }
+    private func persistSettings() {
+        var settings = ClipBarViewModel.shared.settings
+        guard settings.batteryChargeLimit != chargeLimit || settings.isBatteryLimiterEnabled != isLimiterEnabled else { return }
+        settings.batteryChargeLimit = chargeLimit
+        settings.isBatteryLimiterEnabled = isLimiterEnabled
+        ClipBarViewModel.shared.updateSettings(settings)
     }
 }
