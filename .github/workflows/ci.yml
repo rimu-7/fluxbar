@@ -27,7 +27,8 @@ concurrency:
 jobs:
   test:
     name: Build and test
-    runs-on: macos-15
+    # Avoid the constrained ARM64 hosted-runner pool selected by macos-15.
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +55,7 @@ jobs:
   package:
     name: Package app
     needs: test
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -70,9 +71,11 @@ jobs:
           restore-keys: spm-${{ runner.os }}-
 
       - name: Build FluxBar.app, zip and dmg
+        env:
+          UNIVERSAL: "1"
         run: scripts/build-app.sh
 
-      # Everything the curl installer and the in-app updater rely on.
+      # Verify the graphical installer and in-app update payload.
       - name: Verify the app bundle
         run: |
           set -euo pipefail
@@ -82,7 +85,11 @@ jobs:
           codesign --verify --deep --strict "$APP"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.fluxbar.FluxBar"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$VERSION"
-          for bin in FluxBar flux clip com.fluxbar.powerd; do test -x "$APP/Contents/MacOS/$bin"; done
+          for bin in FluxBar flux clip com.fluxbar.powerd; do
+            test -x "$APP/Contents/MacOS/$bin"
+            ARCHS="$(lipo -archs "$APP/Contents/MacOS/$bin")"
+            [[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || { echo "::error::$bin is not universal ($ARCHS)"; exit 1; }
+          done
           test "$("$APP/Contents/MacOS/flux" --version)" = "$VERSION"
 
           cd dist

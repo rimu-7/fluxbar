@@ -18,7 +18,8 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-15
+    # Universal builds can run on Intel while ARM64 hosted capacity is constrained.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     env:
       HAS_SIGNING_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
